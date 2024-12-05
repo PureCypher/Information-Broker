@@ -1,0 +1,13 @@
+https://www.bleepingcomputer.com/feed/
+https://feeds.feedburner.com/TheHackersNews
+https://www.darkreading.com/rss.xml
+https://krebsonsecurity.com/feed/
+https://news.sophos.com/en-us/feed/
+https://truefort.com/feed/
+https://www.nist.gov/blogs/cybersecurity-insights/rss.xml
+https://www.proofpoint.com/us/rss.xml
+https://www.binarydefense.com/feed/
+https://heimdalsecurity.com/blog/feed/
+https://socprime.com/feed/
+https://any.run/cybersecurity-blog/feed/
+https://www.canarytrap.com/feed/
