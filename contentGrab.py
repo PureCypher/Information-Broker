@@ -1,13 +1,14 @@
 #!/usr/bin/python3
 
 """
-Scrape all sites for every article past & present and pass it through a Llama3.2 instance running locally to summarize in a TLDR. 
+Scrape all sites for every article past & present and pass it through a Llama3.2 instance running locally to summarize in a TLDR.
 """
 
 # Standard libraries
 import sqlite3
 from hashlib import sha256
 from typing import Optional
+import random
 
 # Third-party libraries
 import requests
@@ -17,11 +18,11 @@ from bs4 import BeautifulSoup
 USER_AGENT = {
     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36'
 }
-IPADDRESS = "127.0.0.1" # change this to what ever you need
+IPADDRESS = "127.0.0.1"
 DB_PATH = "./articles.db"
 FEEDS_FILE_PATH = "./feeds.txt"
-API_URL = "http://{IPADDRESS}:11434/api/generate" # Put either localhost with Ollama 
-MODEL_NAME = "llama3.2"
+API_URL = f"http://{IPADDRESS}:11434/api/generate" # Put either localhost with Ollama
+MODEL_NAME = "llama3.2:custom"
 
 
 def get_title(field: BeautifulSoup) -> str:
@@ -29,12 +30,17 @@ def get_title(field: BeautifulSoup) -> str:
     title = field.find('title')
     return title.text if title else 'N/A'
 
+def get_description(field: BeautifulSoup) -> str:
+    """Extracts the description from an RSS field."""
+    description = field.find('description')
+    return description.text if description else 'N/A'
+
 
 def get_published_date(field: BeautifulSoup, url: str) -> str:
     """Extracts the publication date from an RSS field."""
     pub_date = field.find('pubDate')
     date_parts = pub_date.text.split()
-    
+
     if len(date_parts) == 6:  # Format: 'Mon, 04 Nov 2024 18:47:32 -0500'
         return f"{date_parts[1]}/{date_parts[2]}/{date_parts[3]}"
     elif len(date_parts) == 5:  # Format: '30 Oct 2024 07:30:08'
@@ -57,12 +63,11 @@ def insert_article(url: str, title: str, link: str, published: str, tldr: str) -
     """Inserts a unique article into the database if it does not exist."""
     h_string = f"{url}{title}{link}"
     hashed = sha256(h_string.encode('UTF-8')).hexdigest()
-    
     table_name = 'nist' if url == 'http://nvd.nist.gov/download/nvd-rss.xml' else 'all_articles'
-    
+
     if article_exists_in_db(hashed, table_name):
         return
-    
+
     query = f"INSERT INTO {table_name} (hash, site_url, title, link, published, tldr) VALUES (?, ?, ?, ?, ?, ?)"
     with sqlite3.connect(DB_PATH) as connection:
         cursor = connection.cursor()
@@ -98,16 +103,23 @@ def extract_article_content(url: str) -> str:
     try:
         response = requests.get(url, headers=USER_AGENT, timeout=600)
         response.raise_for_status()
-        
         soup = BeautifulSoup(response.content, 'html.parser')
-        content_tags = soup.find('article') or soup.find('div', class_="main-content") or soup.find_all('p')
-        
-        if content_tags:
-            main_text = " ".join([tag.get_text(strip=True) for tag in content_tags])
-            return main_text
-        return "N/A"
-        
+        # Try to find main content container first
+        content = ""
+        main_container = soup.find('article') or soup.find('div', class_="main-content")
+        if main_container:
+            # Get all p tags within the main container
+            paragraphs = main_container.find_all('p', recursive=True)
+            if paragraphs:
+                content = " ".join(p.get_text(strip=True) for p in paragraphs if p.get_text(strip=True))
+        # If no content found in main container, try all p tags
+        if not content:
+            paragraphs = soup.find_all('p')
+            content = " ".join(p.get_text(strip=True) for p in paragraphs if p.get_text(strip=True))
+
+        return content if content else "N/A"
     except requests.RequestException as e:
+        print(f"Error fetching article content from {url}: {e}")
         return "N/A"
 
 
@@ -120,34 +132,33 @@ def scrape_feeds():
             try:
                 response = requests.get(url, headers=USER_AGENT, timeout=600)
                 response.raise_for_status()
-                
                 soup = BeautifulSoup(response.content, 'xml')
                 articles = soup.find_all('item')
-                
                 for article in articles:
                     link = article.find('link').text
                     title = get_title(article)
                     published = get_published_date(article, url)
-                    
                     # Create hash for checking existence
                     h_string = f"{url}{title}{link}"
                     hashed = sha256(h_string.encode('UTF-8')).hexdigest()
                     table_name = 'nist' if url == 'http://nvd.nist.gov/download/nvd-rss.xml' else 'all_articles'
-                    
                     # Skip if article exists
                     if article_exists_in_db(hashed, table_name):
                         continue
                     tLink = check_link(link)
-                    description = extract_article_content(tLink)
-                    summary = generate_summary(description) or "N/A"
+                    if url == "https://feeds.feedburner.com/TheHackersNews":
+                        description = get_description(article)
+                        summary = description
+                    else:
+                        description = extract_article_content(tLink)
+                        summary = generate_summary(description) or "N/A"
                     insert_article(url, title, link, published, summary)
-                    
                     results.append({
                         'SITE_URL': url,
                         'TITLE': title,
                         'LINK': tLink,
                         'PUBLISHED': published,
-                        'tldr': summary
+                        'tldr': summary,
                     })
             except requests.RequestException as e:
                 print(f"Error processing feed {url}: {e}")
