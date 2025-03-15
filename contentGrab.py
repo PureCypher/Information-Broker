@@ -168,7 +168,7 @@ def extract_article_content(url: str) -> str:
             site_specific_selectors = {
                 "any.run": ("class", "entry-content single-post"), 
                 "bleepingcomputer.com": ("class", "article_section"),
-                "binarydefense.com": ("class", "entry-content"),
+                "binarydefense.com": ("class", "TwoColumnLayout"),
                 "thehackernews.com": ("class", "articlebody clear cf"),
                 "darkreading.com": ("class", "TwoColumnLayout"),
                 "krebsonsecurity.com": ("class", "wrapper"),
@@ -223,7 +223,7 @@ def extract_article_content(url: str) -> str:
             site_content_selectors = {
                 "any.run": ("div", "entry-content__content js-content"),
                 "bleepingcomputer.com": ("div", "articleBody"),
-                "binarydefense.com": ("div", "entry-content"),
+                "binarydefense.com": ("div", "ArticleBase-Body"),
                 "thehackernews.com": ("div", "post-content"),
                 "darkreading.com": ("div", "ArticleBase-Body"),
                 "krebsonsecurity.com": ("div", "content"),
