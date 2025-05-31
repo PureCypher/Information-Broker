@@ -33,11 +33,12 @@ type DatabaseConfig struct {
 
 // AppConfig holds general application configuration
 type AppConfig struct {
-	Port             int
-	RSSFetchInterval time.Duration
-	RSSFeedsFile     string
-	LogLevel         string
-	InitiationDate   time.Time
+	Port              int
+	RSSFetchInterval  time.Duration
+	RSSFeedsFile      string
+	LogLevel          string
+	InitiationDate    time.Time
+	ArticleCutoffDate time.Time
 }
 
 // APIConfig holds API-related configuration
@@ -110,11 +111,12 @@ func Load() *Config {
 			Name:     getEnv("DB_NAME", "information_broker"),
 		},
 		App: AppConfig{
-			Port:             getEnvInt("APP_PORT", 8080),
-			RSSFetchInterval: getEnvDuration("RSS_FETCH_INTERVAL", 5*time.Minute),
-			RSSFeedsFile:     getEnv("RSS_FEEDS_FILE", "/app/feeds.txt"),
-			LogLevel:         getEnv("LOG_LEVEL", "info"),
-			InitiationDate:   getEnvTime("APP_INITIATION_DATE", time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)),
+			Port:              getEnvInt("APP_PORT", 8080),
+			RSSFetchInterval:  getEnvDuration("RSS_FETCH_INTERVAL", 5*time.Minute),
+			RSSFeedsFile:      getEnv("RSS_FEEDS_FILE", "/app/feeds.txt"),
+			LogLevel:          getEnv("LOG_LEVEL", "info"),
+			InitiationDate:    getEnvTime("APP_INITIATION_DATE", time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)),
+			ArticleCutoffDate: getEnvTime("ARTICLE_CUTOFF_DATE", time.Date(2025, 5, 31, 0, 0, 0, 0, time.UTC)),
 		},
 		API: APIConfig{
 			Timeout:   getEnvDuration("API_TIMEOUT", 30*time.Second),

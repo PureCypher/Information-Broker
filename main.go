@@ -196,7 +196,7 @@ func createTables(db *sql.DB) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_articles_url ON articles(url)`,
 		`CREATE INDEX IF NOT EXISTS idx_articles_content_hash ON articles(content_hash)`,
-		`CREATE INDEX IF NOT EXISTS idx_articles_published_at ON articles(publish_date)`,
+		`CREATE INDEX IF NOT EXISTS idx_articles_published_at ON articles(published_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_articles_feed_url ON articles(feed_url)`,
 		`CREATE TABLE IF NOT EXISTS fetch_logs (
 			id SERIAL PRIMARY KEY,

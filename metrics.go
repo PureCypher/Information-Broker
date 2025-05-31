@@ -46,6 +46,10 @@ type PrometheusMetrics struct {
 	summarizationProcessingTime *prometheus.HistogramVec
 	summarizationQueueWaitTime  *prometheus.HistogramVec
 	summarizationTotalProcessed *prometheus.CounterVec
+
+	// Article date filtering metrics
+	articlesFilteredPreCutoff   *prometheus.CounterVec
+	articlesProcessedPostCutoff *prometheus.CounterVec
 }
 
 // NewPrometheusMetrics creates and registers all Prometheus metrics
@@ -219,6 +223,22 @@ func NewPrometheusMetrics() *PrometheusMetrics {
 			},
 			[]string{"model", "status"},
 		),
+
+		// Article date filtering metrics
+		articlesFilteredPreCutoff: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "articles_filtered_pre_cutoff_total",
+				Help: "Total number of articles filtered out due to publication date before cutoff",
+			},
+			[]string{"feed_url"},
+		),
+		articlesProcessedPostCutoff: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "articles_processed_post_cutoff_total",
+				Help: "Total number of articles processed after passing cutoff date filter",
+			},
+			[]string{"feed_url"},
+		),
 	}
 
 	// Register all metrics
@@ -244,6 +264,8 @@ func NewPrometheusMetrics() *PrometheusMetrics {
 		metrics.summarizationProcessingTime,
 		metrics.summarizationQueueWaitTime,
 		metrics.summarizationTotalProcessed,
+		metrics.articlesFilteredPreCutoff,
+		metrics.articlesProcessedPostCutoff,
 	)
 
 	return metrics
@@ -369,6 +391,16 @@ func (m *PrometheusMetrics) RecordSummarizationProcessing(model, status string, 
 // RecordSummarizationQueueWait records time spent waiting in queue
 func (m *PrometheusMetrics) RecordSummarizationQueueWait(model string, waitTime time.Duration) {
 	m.summarizationQueueWaitTime.WithLabelValues(model).Observe(waitTime.Seconds())
+}
+
+// RecordArticleFilteredPreCutoff records when an article is filtered due to pre-cutoff date
+func (m *PrometheusMetrics) RecordArticleFilteredPreCutoff(feedURL string) {
+	m.articlesFilteredPreCutoff.WithLabelValues(feedURL).Inc()
+}
+
+// RecordArticleProcessedPostCutoff records when an article passes the cutoff date filter
+func (m *PrometheusMetrics) RecordArticleProcessedPostCutoff(feedURL string) {
+	m.articlesProcessedPostCutoff.WithLabelValues(feedURL).Inc()
 }
 
 // MetricsHandler returns the Prometheus metrics handler

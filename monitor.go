@@ -284,15 +284,37 @@ func (m *RSSMonitor) processArticle(item *gofeed.Item, feedURL string) bool {
 		return false
 	}
 
-	// Check publication date against initiation date
+	// Parse and normalize the publish date to UTC
+	var publishDate time.Time
 	if item.PublishedParsed != nil {
-		if item.PublishedParsed.Before(m.config.App.InitiationDate) {
-			m.metrics.RecordArticleProcessed(feedURL, "skipped_before_initiation")
-			log.Printf("Skipping article published before initiation date: %s (published: %s, initiation: %s)",
-				item.Title, item.PublishedParsed.Format("2006-01-02"), m.config.App.InitiationDate.Format("2006-01-02"))
-			return false
-		}
+		publishDate = item.PublishedParsed.UTC()
+	} else {
+		// If no publish date is available, skip the article as per requirements
+		log.Printf("Skipping article with missing publish date: %s", item.Title)
+		m.metrics.RecordArticleProcessed(feedURL, "skipped_no_publish_date")
+		return false
 	}
+
+	// Check publication date against the cutoff date (2025-05-31T00:00:00Z)
+	cutoffDate := m.config.App.ArticleCutoffDate.UTC()
+	if publishDate.Before(cutoffDate) {
+		log.Printf("Skipping article published before cutoff date: %s (published: %s, cutoff: %s)",
+			item.Title, publishDate.Format("2006-01-02T15:04:05Z"), cutoffDate.Format("2006-01-02T15:04:05Z"))
+		m.metrics.RecordArticleFilteredPreCutoff(feedURL)
+		m.metrics.RecordArticleProcessed(feedURL, "skipped_before_cutoff")
+		return false
+	}
+
+	// Check publication date against initiation date (keep existing logic for backward compatibility)
+	if publishDate.Before(m.config.App.InitiationDate) {
+		m.metrics.RecordArticleProcessed(feedURL, "skipped_before_initiation")
+		log.Printf("Skipping article published before initiation date: %s (published: %s, initiation: %s)",
+			item.Title, publishDate.Format("2006-01-02"), m.config.App.InitiationDate.Format("2006-01-02"))
+		return false
+	}
+
+	// Article passed the cutoff date filter
+	m.metrics.RecordArticleProcessedPostCutoff(feedURL)
 
 	// Check if we've already seen this article
 	m.mutex.RLock()
@@ -323,12 +345,8 @@ func (m *RSSMonitor) processArticle(item *gofeed.Item, feedURL string) bool {
 		FeedURL:       feedURL,
 	}
 
-	// Set published time
-	if item.PublishedParsed != nil {
-		article.PublishedAt = *item.PublishedParsed
-	} else {
-		article.PublishedAt = time.Now()
-	}
+	// Set published time (we already validated it exists above)
+	article.PublishedAt = publishDate
 
 	// Generate content hash for deduplication
 	article.ContentHash = m.generateContentHash(article.Title, article.URL, article.Content)
@@ -424,7 +442,7 @@ func (m *RSSMonitor) generateContentHash(title, url, content string) string {
 // saveArticle saves an article to the database
 func (m *RSSMonitor) saveArticle(article Article) error {
 	query := `
-		INSERT INTO articles (title, url, full_content, publish_date, fetch_duration_ms, feed_url, content_hash)
+		INSERT INTO articles (title, url, content, published_at, fetch_duration_ms, feed_url, content_hash)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (url) DO NOTHING`
 

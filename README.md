@@ -198,6 +198,8 @@ RSS_FEEDS_FILE=/app/feeds.txt      # RSS feeds configuration file
 LOG_LEVEL=info                     # Logging level (debug/info/warn/error)
 APP_INITIATION_DATE=2020-01-01     # Articles published before this date will be ignored
                                    # Format: YYYY-MM-DD, YYYY-MM-DDTHH:MM:SSZ, or YYYY-MM-DD HH:MM:SS
+ARTICLE_CUTOFF_DATE=2025-05-31T00:00:00Z  # Only articles published on/after this date are processed
+                                          # Timezone-agnostic UTC comparison
 ```
 
 #### Ollama AI Configuration
@@ -260,11 +262,31 @@ The system includes 47 pre-configured cybersecurity and technology feeds coverin
 
 ### Article Filtering and Chronological Processing
 
-The system includes intelligent article filtering to prevent processing historical articles when the system first starts:
+The system includes intelligent article filtering with two complementary mechanisms to control which articles are processed:
 
-#### Initiation Date Configuration
+#### Article Cutoff Date (Primary Filter)
+The primary filtering mechanism uses a strict UTC-based cutoff date to ensure only articles published on or after a specific date and time are processed:
+
 ```bash
-# Set the initiation date in .env file
+# Set the article cutoff date in .env file
+ARTICLE_CUTOFF_DATE=2025-05-31T00:00:00Z     # Only articles from this date/time forward
+
+# Supported date formats:
+ARTICLE_CUTOFF_DATE=2025-05-31                    # Date only (assumes 00:00:00Z)
+ARTICLE_CUTOFF_DATE=2025-05-31T00:00:00Z          # Full ISO 8601 UTC format (recommended)
+ARTICLE_CUTOFF_DATE=2025-05-31T10:30:00+05:00     # With timezone (converted to UTC)
+```
+
+**Key Features:**
+- **Thread-Safe**: Efficient date parsing with normalized UTC comparison
+- **Timezone-Agnostic**: All dates are converted to UTC for consistent comparison
+- **RSS Format Compatible**: Supports all common RSS date formats automatically
+- **No Missing Dates**: Articles without publish dates are skipped (safer default)
+- **Prometheus Metrics**: Tracks filtered vs processed articles separately
+
+#### Initiation Date Configuration (Legacy Filter)
+```bash
+# Set the initiation date in .env file (for backward compatibility)
 APP_INITIATION_DATE=2024-01-01     # Articles before this date will be ignored
 
 # Supported date formats:
@@ -273,25 +295,85 @@ APP_INITIATION_DATE=2024-01-01T10:30:00Z          # ISO 8601 with timezone
 APP_INITIATION_DATE=2024-01-01 10:30:00           # Date and time
 ```
 
-#### How It Works
-- **Historical Article Filtering**: Articles published before the configured initiation date are automatically skipped
-- **Chronological Processing**: Articles from RSS feeds are sorted by publication date and processed in chronological order (oldest first)
-- **Logging**: Skipped articles are logged with their publication date and the configured initiation date for transparency
-- **Metrics**: Filtered articles are tracked in Prometheus metrics as `skipped_before_initiation`
+#### How the Dual Filtering Works
+1. **Date Validation**: Articles without publish dates are immediately rejected
+2. **Cutoff Date Check**: Articles before `ARTICLE_CUTOFF_DATE` are filtered (tracked as `articles_filtered_pre_cutoff_total`)
+3. **Initiation Date Check**: Articles before `APP_INITIATION_DATE` are filtered (tracked as `skipped_before_initiation`)
+4. **Processing**: Only articles passing both filters are processed (tracked as `articles_processed_post_cutoff_total`)
+5. **Chronological Processing**: Approved articles are sorted by publication date and processed in chronological order (oldest first)
 
-#### Use Cases
-- **New Deployments**: Set initiation date to system deployment date to avoid processing years of historical articles
-- **System Migrations**: Configure date to resume processing from a specific point in time
-- **Testing**: Use recent dates during development to limit article volume
-- **Maintenance**: Restart processing from a known good date after system issues
+#### Database and Storage Behavior
+- **No Database Storage**: Articles filtered by cutoff date are never inserted into the database
+- **No Processing**: Filtered articles bypass all summarization and Discord notification steps
+- **Clean Logs**: Filtered articles are logged but don't clutter processing metrics
+- **Resource Efficient**: Filtering happens early in the pipeline to minimize resource usage
 
-#### Example Configuration
+#### Prometheus Metrics for Monitoring
 ```bash
-# For a new system deployed on 2024-06-01, only process articles from that date forward
-APP_INITIATION_DATE=2024-06-01
+# New metrics for cutoff date filtering
+articles_filtered_pre_cutoff_total{feed_url}      # Articles filtered before cutoff date
+articles_processed_post_cutoff_total{feed_url}    # Articles that passed cutoff filter
 
-# This will skip all articles published before June 1st, 2024
-# and process newer articles in chronological order
+# Example queries for Grafana
+rate(articles_filtered_pre_cutoff_total[5m])      # Rate of filtered articles
+rate(articles_processed_post_cutoff_total[5m])    # Rate of processed articles
+```
+
+#### Use Cases and Configuration Examples
+
+**Production Deployment (Recommended)**
+```bash
+# Process only articles from May 31, 2025 onward
+ARTICLE_CUTOFF_DATE=2025-05-31T00:00:00Z
+APP_INITIATION_DATE=2020-01-01  # Keep as fallback
+```
+
+**Testing Environment**
+```bash
+# Process only today's articles for testing
+ARTICLE_CUTOFF_DATE=2025-05-31T00:00:00Z
+APP_INITIATION_DATE=2025-05-31
+```
+
+**Migration from Old System**
+```bash
+# Resume processing from last known good date
+ARTICLE_CUTOFF_DATE=2025-05-30T15:30:00Z  # Exact time when old system stopped
+APP_INITIATION_DATE=2025-01-01             # Broader fallback
+```
+
+**Development with Timezone Handling**
+```bash
+# Handle articles from different timezones correctly
+ARTICLE_CUTOFF_DATE=2025-05-31T00:00:00Z  # 12AM UTC = 8PM EST previous day
+
+# This ensures consistent filtering regardless of article's original timezone
+```
+
+#### Timezone Handling Examples
+The system automatically normalizes all dates to UTC for comparison:
+
+```bash
+# Article published at 8PM EST on May 30, 2025
+# Converts to: 2025-05-31T01:00:00Z (passes cutoff)
+
+# Article published at 6PM PST on May 30, 2025
+# Converts to: 2025-05-31T02:00:00Z (passes cutoff)
+
+# Article published at 11PM UTC on May 30, 2025
+# Stays as: 2025-05-30T23:00:00Z (filtered out)
+```
+
+#### Testing and Validation
+```bash
+# Test the filtering logic
+go test -v -run TestArticleDateFiltering
+
+# Test timezone handling specifically
+go test -v -run TestTimezoneHandling
+
+# Run demonstration script
+go run test_cutoff_date.go
 ```
 
 ### Monitoring Pipeline Health
@@ -383,6 +465,11 @@ The system includes five pre-configured dashboards:
 - `rss_articles_found_total`: Articles discovered per feed
 - `rss_new_articles_total`: New articles added to database
 - `rss_fetch_duration_seconds`: Feed fetching latency
+
+#### Article Filtering Metrics
+- `articles_filtered_pre_cutoff_total`: Articles filtered due to publication before cutoff date
+- `articles_processed_post_cutoff_total`: Articles that passed cutoff date filter and were processed
+- `articles_processed_total`: Total articles processed with detailed status breakdown
 
 #### Summarization Metrics
 - `summarization_requests_total`: Summarization requests by status
