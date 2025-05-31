@@ -77,7 +77,7 @@ Information Broker solves the challenge of staying informed in today's informati
 
 1. **Clone the Repository**
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/PureCypher/Information-Broker
    cd information-broker
    ```
 
@@ -156,18 +156,6 @@ This script generates:
 - **Database Password**: 32-character secure password for PostgreSQL
 - **Grafana Admin Password**: 24-character password for Grafana admin login
 - **Grafana Secret Key**: 32-character alphanumeric key for internal encryption
-
-#### Password Regeneration
-```bash
-# Regenerate all passwords (requires confirmation)
-./scripts/regenerate-passwords.sh
-```
-
-**Important**: After regenerating passwords, restart your services:
-```bash
-docker-compose down
-docker-compose up -d
-```
 
 #### Manual Password Management
 If you prefer to set passwords manually, edit the `.env` file:
