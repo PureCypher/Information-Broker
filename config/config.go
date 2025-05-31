@@ -37,6 +37,7 @@ type AppConfig struct {
 	RSSFetchInterval time.Duration
 	RSSFeedsFile     string
 	LogLevel         string
+	InitiationDate   time.Time
 }
 
 // APIConfig holds API-related configuration
@@ -113,6 +114,7 @@ func Load() *Config {
 			RSSFetchInterval: getEnvDuration("RSS_FETCH_INTERVAL", 5*time.Minute),
 			RSSFeedsFile:     getEnv("RSS_FEEDS_FILE", "/app/feeds.txt"),
 			LogLevel:         getEnv("LOG_LEVEL", "info"),
+			InitiationDate:   getEnvTime("APP_INITIATION_DATE", time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)),
 		},
 		API: APIConfig{
 			Timeout:   getEnvDuration("API_TIMEOUT", 30*time.Second),
@@ -197,6 +199,24 @@ func getEnvStringSlice(key string, defaultValue []string) []string {
 			}
 		}
 		return result
+	}
+	return defaultValue
+}
+
+func getEnvTime(key string, defaultValue time.Time) time.Time {
+	if value := os.Getenv(key); value != "" {
+		// Try parsing in RFC3339 format first (2006-01-02T15:04:05Z07:00)
+		if parsedTime, err := time.Parse(time.RFC3339, value); err == nil {
+			return parsedTime
+		}
+		// Try parsing in date-only format (2006-01-02)
+		if parsedTime, err := time.Parse("2006-01-02", value); err == nil {
+			return parsedTime
+		}
+		// Try parsing in date-time format without timezone (2006-01-02 15:04:05)
+		if parsedTime, err := time.Parse("2006-01-02 15:04:05", value); err == nil {
+			return parsedTime
+		}
 	}
 	return defaultValue
 }

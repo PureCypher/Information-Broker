@@ -63,6 +63,8 @@ Information Broker solves the challenge of staying informed in today's informati
 - **Content Deduplication**: SHA-256 content hashing prevents duplicate article processing
 - **Health Monitoring**: Built-in health checks for all services with dependency validation
 - **Graceful Shutdown**: Proper signal handling and resource cleanup on termination
+- **Article Filtering**: Configurable initiation date to ignore articles published before system start
+- **Chronological Processing**: Articles are processed in chronological order to maintain temporal consistency
 
 ## Getting Started
 
@@ -194,6 +196,8 @@ APP_PORT=8080                      # API server port
 RSS_FETCH_INTERVAL=5m              # Feed polling interval
 RSS_FEEDS_FILE=/app/feeds.txt      # RSS feeds configuration file
 LOG_LEVEL=info                     # Logging level (debug/info/warn/error)
+APP_INITIATION_DATE=2020-01-01     # Articles published before this date will be ignored
+                                   # Format: YYYY-MM-DD, YYYY-MM-DDTHH:MM:SSZ, or YYYY-MM-DD HH:MM:SS
 ```
 
 #### Ollama AI Configuration
@@ -253,6 +257,42 @@ docker compose restart rss-monitor
 ```
 
 The system includes 47 pre-configured cybersecurity and technology feeds covering major news sources, security publications, and threat intelligence feeds.
+
+### Article Filtering and Chronological Processing
+
+The system includes intelligent article filtering to prevent processing historical articles when the system first starts:
+
+#### Initiation Date Configuration
+```bash
+# Set the initiation date in .env file
+APP_INITIATION_DATE=2024-01-01     # Articles before this date will be ignored
+
+# Supported date formats:
+APP_INITIATION_DATE=2024-01-01                    # Date only
+APP_INITIATION_DATE=2024-01-01T10:30:00Z          # ISO 8601 with timezone
+APP_INITIATION_DATE=2024-01-01 10:30:00           # Date and time
+```
+
+#### How It Works
+- **Historical Article Filtering**: Articles published before the configured initiation date are automatically skipped
+- **Chronological Processing**: Articles from RSS feeds are sorted by publication date and processed in chronological order (oldest first)
+- **Logging**: Skipped articles are logged with their publication date and the configured initiation date for transparency
+- **Metrics**: Filtered articles are tracked in Prometheus metrics as `skipped_before_initiation`
+
+#### Use Cases
+- **New Deployments**: Set initiation date to system deployment date to avoid processing years of historical articles
+- **System Migrations**: Configure date to resume processing from a specific point in time
+- **Testing**: Use recent dates during development to limit article volume
+- **Maintenance**: Restart processing from a known good date after system issues
+
+#### Example Configuration
+```bash
+# For a new system deployed on 2024-06-01, only process articles from that date forward
+APP_INITIATION_DATE=2024-06-01
+
+# This will skip all articles published before June 1st, 2024
+# and process newer articles in chronological order
+```
 
 ### Monitoring Pipeline Health
 

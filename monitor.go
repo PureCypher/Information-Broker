@@ -8,6 +8,7 @@ import (
 	"information-broker/config"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -220,7 +221,39 @@ func (m *RSSMonitor) doFetchFeed(ctx context.Context, feedURL string, startTime 
 	newArticles := 0
 	totalArticles := len(feed.Items)
 
-	for _, item := range feed.Items {
+	// Sort articles by publication date (oldest first) to maintain chronological order
+	sortedItems := make([]*gofeed.Item, len(feed.Items))
+	copy(sortedItems, feed.Items)
+
+	sort.Slice(sortedItems, func(i, j int) bool {
+		// Handle cases where PublishedParsed might be nil
+		timeI := time.Time{}
+		timeJ := time.Time{}
+
+		if sortedItems[i].PublishedParsed != nil {
+			timeI = *sortedItems[i].PublishedParsed
+		}
+		if sortedItems[j].PublishedParsed != nil {
+			timeJ = *sortedItems[j].PublishedParsed
+		}
+
+		// If both times are zero (nil), maintain original order
+		if timeI.IsZero() && timeJ.IsZero() {
+			return i < j
+		}
+		// If one is zero, put the non-zero one first
+		if timeI.IsZero() {
+			return false
+		}
+		if timeJ.IsZero() {
+			return true
+		}
+
+		// Both have valid times, sort chronologically (oldest first)
+		return timeI.Before(timeJ)
+	})
+
+	for _, item := range sortedItems {
 		if ctx.Err() != nil {
 			return ctx.Err() // Context cancelled
 		}
@@ -249,6 +282,16 @@ func (m *RSSMonitor) processArticle(item *gofeed.Item, feedURL string) bool {
 	if item.Link == "" {
 		m.metrics.RecordArticleProcessed(feedURL, "skipped_no_link")
 		return false
+	}
+
+	// Check publication date against initiation date
+	if item.PublishedParsed != nil {
+		if item.PublishedParsed.Before(m.config.App.InitiationDate) {
+			m.metrics.RecordArticleProcessed(feedURL, "skipped_before_initiation")
+			log.Printf("Skipping article published before initiation date: %s (published: %s, initiation: %s)",
+				item.Title, item.PublishedParsed.Format("2006-01-02"), m.config.App.InitiationDate.Format("2006-01-02"))
+			return false
+		}
 	}
 
 	// Check if we've already seen this article
