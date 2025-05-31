@@ -434,7 +434,7 @@ func (s *SummarizationScheduler) sendDiscordNotification(request SummarizationRe
 	// Check if article was published before the initiation date
 	if publishDate.Before(s.config.App.InitiationDate) {
 		log.Printf("Skipping Discord notification for article published before initiation date: %s (published: %s, initiation: %s)",
-			request.ArticleTitle, publishDate.Format("2006-01-02"), s.config.App.InitiationDate.Format("2006-01-02"))
+			request.ArticleTitle, publishDate.Format("2025-05-31"), s.config.App.InitiationDate.Format("2025-05-31"))
 		return
 	}
 
