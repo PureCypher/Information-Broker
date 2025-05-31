@@ -1,0 +1,268 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: information-broker-postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME:-information_broker}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-information_broker}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - app-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+  # Main RSS Monitor Application
+  rss-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: information-broker-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Database Configuration
+      DB_HOST: postgres
+      DB_PORT: ${DB_PORT:-5432}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DB_NAME: ${DB_NAME:-information_broker}
+      
+      # Application Configuration
+      APP_PORT: ${APP_PORT:-8080}
+      RSS_FETCH_INTERVAL: ${RSS_FETCH_INTERVAL:-5m}
+      RSS_FEEDS_FILE: ${RSS_FEEDS_FILE:-/app/feeds.txt}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      
+      # API Configuration
+      API_TIMEOUT: ${API_TIMEOUT:-30s}
+      API_USER_AGENT: ${API_USER_AGENT:-Information-Broker/1.0}
+      
+      # OLLAMA Configuration
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama2}
+      OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-60s}
+      OLLAMA_MAX_RETRIES: ${OLLAMA_MAX_RETRIES:-3}
+      
+      # Discord Configuration
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      DISCORD_WEBHOOK_URLS: ${DISCORD_WEBHOOK_URLS:-}
+      DISCORD_MAX_RETRIES: ${DISCORD_MAX_RETRIES:-2}
+      DISCORD_TIMEOUT: ${DISCORD_TIMEOUT:-30s}
+      
+      # Prometheus Configuration
+      PROMETHEUS_METRICS_PATH: ${PROMETHEUS_METRICS_PATH:-/metrics}
+      
+      # Security Configuration
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-*}
+      CORS_ALLOWED_METHODS: ${CORS_ALLOWED_METHODS:-GET,POST,PUT,DELETE,OPTIONS}
+      CORS_ALLOWED_HEADERS: ${CORS_ALLOWED_HEADERS:-Content-Type,Authorization}
+      
+      # Performance Configuration
+      MAX_CONCURRENT_FEEDS: ${MAX_CONCURRENT_FEEDS:-10}
+      MAX_ARTICLE_CONTENT_LENGTH: ${MAX_ARTICLE_CONTENT_LENGTH:-10000}
+      HTTP_READ_TIMEOUT: ${HTTP_READ_TIMEOUT:-15s}
+      HTTP_WRITE_TIMEOUT: ${HTTP_WRITE_TIMEOUT:-15s}
+      HTTP_IDLE_TIMEOUT: ${HTTP_IDLE_TIMEOUT:-60s}
+      
+      # Content Configuration
+      MAX_SUMMARY_LENGTH: ${MAX_SUMMARY_LENGTH:-200}
+      CONTENT_HASH_ALGORITHM: ${CONTENT_HASH_ALGORITHM:-sha256}
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - app-network
+    labels:
+      - "prometheus.scrape=true"
+      - "prometheus.port=8080"
+      - "prometheus.path=/metrics"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+  # Prometheus Monitoring
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: information-broker-prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-90d}'
+      - '--web.enable-lifecycle'
+      - '--log.level=${PROMETHEUS_LOG_LEVEL:-info}'
+      - '--web.enable-admin-api'
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - app-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # Grafana Dashboard
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: information-broker-grafana
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    environment:
+      # Security
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_SECURITY_SECRET_KEY: ${GRAFANA_SECRET_KEY:-SW2YcwTIb9zpOOhoPsMm}
+      
+      # Users
+      GF_USERS_ALLOW_SIGN_UP: ${GRAFANA_ALLOW_SIGNUP:-false}
+      GF_USERS_AUTO_ASSIGN_ORG_ROLE: ${GRAFANA_AUTO_ASSIGN_ROLE:-Viewer}
+      
+      # Anonymous access
+      GF_AUTH_ANONYMOUS_ENABLED: ${GRAFANA_ANONYMOUS_ENABLED:-false}
+      
+      # Plugins
+      GF_INSTALL_PLUGINS: ${GRAFANA_PLUGINS:-grafana-piechart-panel}
+      
+      # Logging
+      GF_LOG_LEVEL: ${GRAFANA_LOG_LEVEL:-info}
+      
+      # Database (use SQLite for simplicity)
+      GF_DATABASE_TYPE: sqlite3
+      GF_DATABASE_PATH: /var/lib/grafana/grafana.db
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - app-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # OLLAMA AI Service (Optional)
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: information-broker-ollama
+  #   ports:
+  #     - "${OLLAMA_PORT:-11434}:11434"
+  #   volumes:
+  #     - ollama_data:/root/.ollama
+  #   environment:
+  #     OLLAMA_HOST: "0.0.0.0"
+  #     OLLAMA_ORIGINS: "*"
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 60s
+  #   restart: unless-stopped
+  #   networks:
+  #     - app-network
+  #   logging:
+  #     driver: "json-file"
+  #     options:
+  #       max-size: "100m"
+  #       max-file: "3"
+    # Uncomment if you have GPU support
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # Alerting Service
+  alertmanager:
+    build:
+      context: ./alerting
+      dockerfile: Dockerfile
+    container_name: information-broker-alertmanager
+    ports:
+      - "${ALERTMANAGER_PORT:-9093}:9093"
+    environment:
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      PROMETHEUS_URL: ${PROMETHEUS_URL:-http://prometheus:9090}
+      CONFIG_FILE: /root/config.yaml
+    volumes:
+      - ./alerting/config.yaml:/root/config.yaml:ro
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9093/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - app-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+networks:
+  app-network:
+    driver: bridge
+    name: information-broker-network
+
+volumes:
+  postgres_data:
+    name: information-broker-postgres-data
+  prometheus_data:
+    name: information-broker-prometheus-data
+  grafana_data:
+    name: information-broker-grafana-data
+  ollama_data:
+    name: information-broker-ollama-data

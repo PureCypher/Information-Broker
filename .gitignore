@@ -1,30 +1,132 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
 *.so
-.Python
-.env
-venv/
-env/
-.venv/
-ENV/
+*.dylib
 
-# Distribution / packaging
-dist/
-build/
-*.egg-info/
+# Go test files
+*.test
 
-# Databases
-*.db
-*.sqlite3
+# Go coverage files
+*.out
 
-# Logs
-*.log
+# Go build cache
+.cache/
 
-# IDE specific files
-.idea/
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# IDE files
 .vscode/
+.idea/
 *.swp
 *.swo
+*~
+
+# macOS
 .DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+*~
+
+# Application binaries
+information-broker
+information-broker-test
+
+# Environment files (contains secrets)
+.env
+.env.secure
+.env.production
+.env.local
+
+# Security Configuration Files
+firewall-rules.sh
+*.key
+*.crt
+*.pem
+*.p12
+*.pfx
+
+# SSL/TLS certificates and keys
+ssl/
+nginx/ssl/
+/etc/ssl/certs/information-broker.*
+/etc/ssl/private/information-broker.*
+
+# Nginx configuration with secrets
+nginx/conf.d/*
+!nginx/conf.d/.gitkeep
+
+# Security audit outputs
+security-audit-*.txt
+security-audit-*.log
+audit-*.json
+
+# Log files
+*.log
+
+# Database dumps and backups (but keep schema/migration files)
+*_dump.sql
+*_backup.sql
+backup_*.sql
+dump_*.sql
+*.dump
+
+# Docker volumes (if using bind mounts)
+data/
+logs/
+
+# Temporary files
+tmp/
+temp/
+
+# Runtime data
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like nyc
+coverage/
+
+# Prometheus data
+prometheus_data/
+
+# Grafana data
+grafana_data/
+
+# PostgreSQL data
+postgres_data/
+
+# OLLAMA data
+ollama_data/
+
+# Node modules (if any frontend tools are added)
+node_modules/
+
+# Yarn
+.yarn/
+.yarnrc.yml
+
+# npm
+.npmrc
+
+# Additional Go-specific ignores
+# Air (hot reload tool) temp files
+.air/
+tmp/
+.tmp/
+
+# Delve debugger
+__debug_bin*
+
+# Go workspace files
+go.work.sum

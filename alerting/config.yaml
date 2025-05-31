@@ -1,0 +1,91 @@
+server:
+  port: 9093
+
+prometheus:
+  url: "http://prometheus:9090"
+
+webhooks:
+  discord:
+    url: ""
+    enabled: false
+  slack:
+    url: ""
+    enabled: false
+
+rules:
+  - name: "rss_fetch_failure_rate_high"
+    query: "rate(rss_fetch_errors_total[5m]) > 0.1"
+    threshold: 0.1
+    operator: "gt"
+    duration: "2m"
+    severity: "warning"
+    description: "RSS fetch failure rate is too high"
+    labels:
+      service: "information-broker"
+      component: "rss-monitor"
+
+  - name: "circuit_breaker_open"
+    query: "circuit_breaker_state{state=\"open\"} > 0"
+    threshold: 0
+    operator: "gt"
+    duration: "1m"
+    severity: "critical"
+    description: "Circuit breaker is open"
+    labels:
+      service: "information-broker"
+      component: "circuit-breaker"
+
+  - name: "discord_webhook_failure_rate_high"
+    query: "rate(discord_webhook_errors_total[5m]) > 0.05"
+    threshold: 0.05
+    operator: "gt"
+    duration: "2m"
+    severity: "warning"
+    description: "Discord webhook failure rate is too high"
+    labels:
+      service: "information-broker"
+      component: "discord"
+
+  - name: "summary_api_failure_rate_high"
+    query: "rate(summary_api_errors_total[5m]) > 0.1"
+    threshold: 0.1
+    operator: "gt"
+    duration: "2m"
+    severity: "warning"
+    description: "Summary API failure rate is too high"
+    labels:
+      service: "information-broker"
+      component: "summarizer"
+
+  - name: "database_connection_issues"
+    query: "database_connections{state=\"open\"} < 1"
+    threshold: 1
+    operator: "lt"
+    duration: "1m"
+    severity: "critical"
+    description: "Database connection issues detected"
+    labels:
+      service: "information-broker"
+      component: "database"
+
+  - name: "high_http_error_rate"
+    query: "rate(http_requests_total{status_code!~\"2..\"}[5m]) / rate(http_requests_total[5m]) > 0.1"
+    threshold: 0.1
+    operator: "gt"
+    duration: "3m"
+    severity: "warning"
+    description: "High HTTP error rate detected"
+    labels:
+      service: "information-broker"
+      component: "api"
+
+  - name: "no_new_articles_found"
+    query: "increase(new_articles_found_total[1h]) == 0"
+    threshold: 0
+    operator: "eq"
+    duration: "1h"
+    severity: "warning"
+    description: "No new articles found in the last hour"
+    labels:
+      service: "information-broker"
+      component: "rss-monitor"
