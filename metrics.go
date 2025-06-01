@@ -50,6 +50,10 @@ type PrometheusMetrics struct {
 	// Article date filtering metrics
 	articlesFilteredPreCutoff   *prometheus.CounterVec
 	articlesProcessedPostCutoff *prometheus.CounterVec
+
+	// Content volume metrics
+	articlesProcessedTotal *prometheus.CounterVec
+	articlesInDatabase     *prometheus.GaugeVec
 }
 
 // NewPrometheusMetrics creates and registers all Prometheus metrics
@@ -82,8 +86,8 @@ func NewPrometheusMetrics() *PrometheusMetrics {
 		// Article processing metrics
 		articlesProcessed: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
-				Name: "articles_processed_total",
-				Help: "Total number of articles processed",
+				Name: "articles_processed_by_feed_total",
+				Help: "Total number of articles processed by feed",
 			},
 			[]string{"feed_url", "status"},
 		),
@@ -239,6 +243,22 @@ func NewPrometheusMetrics() *PrometheusMetrics {
 			},
 			[]string{"feed_url"},
 		),
+
+		// Content volume metrics
+		articlesProcessedTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "articles_processed_total",
+				Help: "Total number of articles processed and written to the database",
+			},
+			[]string{"status"},
+		),
+		articlesInDatabase: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "articles_in_database",
+				Help: "Current total number of articles in the database",
+			},
+			[]string{},
+		),
 	}
 
 	// Register all metrics
@@ -266,6 +286,8 @@ func NewPrometheusMetrics() *PrometheusMetrics {
 		metrics.summarizationTotalProcessed,
 		metrics.articlesFilteredPreCutoff,
 		metrics.articlesProcessedPostCutoff,
+		metrics.articlesProcessedTotal,
+		metrics.articlesInDatabase,
 	)
 
 	return metrics
@@ -401,6 +423,16 @@ func (m *PrometheusMetrics) RecordArticleFilteredPreCutoff(feedURL string) {
 // RecordArticleProcessedPostCutoff records when an article passes the cutoff date filter
 func (m *PrometheusMetrics) RecordArticleProcessedPostCutoff(feedURL string) {
 	m.articlesProcessedPostCutoff.WithLabelValues(feedURL).Inc()
+}
+
+// RecordArticleProcessedTotal records when an article is processed and written to database
+func (m *PrometheusMetrics) RecordArticleProcessedTotal(status string) {
+	m.articlesProcessedTotal.WithLabelValues(status).Inc()
+}
+
+// UpdateArticlesInDatabase updates the current count of articles in database
+func (m *PrometheusMetrics) UpdateArticlesInDatabase(count int64) {
+	m.articlesInDatabase.WithLabelValues().Set(float64(count))
 }
 
 // MetricsHandler returns the Prometheus metrics handler

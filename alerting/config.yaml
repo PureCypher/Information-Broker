@@ -89,3 +89,14 @@ rules:
     labels:
       service: "information-broker"
       component: "rss-monitor"
+
+  - name: "daily_article_processing_low"
+    query: "increase(articles_processed_total{status=\"success\"}[1d]) < 5"
+    threshold: 5
+    operator: "lt"
+    duration: "6h"
+    severity: "warning"
+    description: "Daily article processing count is below threshold (less than 5 articles processed in the last day)"
+    labels:
+      service: "information-broker"
+      component: "content-volume"

@@ -429,6 +429,25 @@ The application handles SIGTERM and SIGINT signals gracefully, ensuring:
 
 ## Monitoring & Observability
 
+### Content Volume Observability
+
+The system provides comprehensive real-time and historical visibility into content volume through:
+
+#### Key Metrics
+- **Total Articles in Database**: Real-time count of all articles stored in the database
+- **Daily Article Ingestion Rate**: Number of articles successfully processed each day over the past 30 days
+- **Article Processing Success/Failure**: Breakdown of processing status for troubleshooting
+
+#### Dashboard Panels
+1. **Total Articles in Database** - Single stat panel showing current article count with configurable thresholds
+2. **Daily Article Ingestion Rate** - Bar chart displaying daily processing trends for content volume analysis
+3. **Real-time Processing Rate** - Time series showing articles processed per minute/hour
+
+#### Alerting
+- **Low Daily Article Count**: Fires when daily article processing falls below 5 articles (configurable threshold)
+- **No Articles Processed**: Critical alert when no articles are processed for 24 hours
+- **Database Growth Stalled**: Alert when no new articles are added for 2 days
+
 ### Grafana Dashboards
 
 The system includes five pre-configured dashboards:
@@ -437,6 +456,8 @@ The system includes five pre-configured dashboards:
    - System health indicators
    - Processing rates and queue status
    - Error rate monitoring
+   - **NEW: Total Articles in Database panel**
+   - **NEW: Daily Article Ingestion Rate chart**
 
 2. **Feed Processing Rates** (`feed-processing-rates-dashboard.json`)
    - Per-feed processing statistics
@@ -466,10 +487,13 @@ The system includes five pre-configured dashboards:
 - `rss_new_articles_total`: New articles added to database
 - `rss_fetch_duration_seconds`: Feed fetching latency
 
+#### Content Volume Metrics
+- `articles_processed_total`: Counter incremented each time an article is processed and written to the database
+- `articles_in_database`: Gauge reflecting the current total article count in the database (updated every 5 minutes)
+
 #### Article Filtering Metrics
 - `articles_filtered_pre_cutoff_total`: Articles filtered due to publication before cutoff date
 - `articles_processed_post_cutoff_total`: Articles that passed cutoff date filter and were processed
-- `articles_processed_total`: Total articles processed with detailed status breakdown
 
 #### Summarization Metrics
 - `summarization_requests_total`: Summarization requests by status
@@ -486,6 +510,35 @@ The system includes five pre-configured dashboards:
 - `database_connections_active`: PostgreSQL connection pool status
 - `http_requests_total`: API endpoint usage
 - `application_uptime_seconds`: Service availability
+
+### Content Volume Monitoring Queries
+
+#### Grafana Dashboard Queries
+```promql
+# Current total articles in database
+articles_in_database
+
+# Daily article ingestion rate (last 30 days)
+increase(articles_processed_total{status="success"}[1d])
+
+# Article processing success rate
+rate(articles_processed_total{status="success"}[5m]) / rate(articles_processed_total[5m]) * 100
+
+# Weekly content volume trend
+increase(articles_processed_total{status="success"}[7d])
+```
+
+#### Alerting Rules
+```promql
+# Daily article processing below threshold
+increase(articles_processed_total{status="success"}[1d]) < 5
+
+# No articles processed in 24 hours
+increase(articles_processed_total{status="success"}[1d]) == 0
+
+# Database growth stalled (no new articles in 2 days)
+increase(articles_processed_total{status="success"}[2d]) == 0
+```
 
 ### Health Check Endpoints
 

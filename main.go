@@ -36,6 +36,9 @@ func main() {
 	}
 	defer db.Close()
 
+	// Create database operations instance for metrics
+	dbOps := NewDatabaseOperations(db)
+
 	// Load RSS feeds
 	feeds, err := loadFeeds(cfg.App.RSSFeedsFile)
 	if err != nil {
@@ -100,6 +103,33 @@ func main() {
 			case <-ticker.C:
 				stats := db.Stats()
 				metrics.UpdateDBConnections(stats.OpenConnections, stats.InUse, stats.Idle)
+			}
+		}
+	}()
+
+	// Start article count metrics updater
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute) // Update every 5 minutes
+		defer ticker.Stop()
+
+		// Initial update
+		if count, err := dbOps.GetArticleCount(); err != nil {
+			log.Printf("Error getting initial article count: %v", err)
+		} else {
+			metrics.UpdateArticlesInDatabase(count)
+			log.Printf("Initial article count in database: %d", count)
+		}
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if count, err := dbOps.GetArticleCount(); err != nil {
+					log.Printf("Error updating article count metric: %v", err)
+				} else {
+					metrics.UpdateArticlesInDatabase(count)
+				}
 			}
 		}
 	}()
@@ -183,21 +213,30 @@ func getEnv(key, defaultValue string) string {
 func createTables(db *sql.DB) error {
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS articles (
-			id SERIAL PRIMARY KEY,
+			id BIGSERIAL PRIMARY KEY,
 			title TEXT NOT NULL,
 			url TEXT UNIQUE NOT NULL,
-			content TEXT,
-			published_at TIMESTAMP WITH TIME ZONE,
-			fetched_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-			fetch_duration_ms INTEGER,
-			feed_url TEXT NOT NULL,
-			content_hash TEXT UNIQUE NOT NULL,
-			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+			publish_date TIMESTAMP WITH TIME ZONE,
+			summary TEXT,
+			full_content TEXT,
+			fetch_time TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			posted_to_discord BOOLEAN DEFAULT FALSE,
+			created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+			
+			-- Additional fields for RSS monitoring compatibility
+			feed_url TEXT,
+			content_hash TEXT UNIQUE,
+			fetch_duration_ms INTEGER
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_articles_url ON articles(url)`,
 		`CREATE INDEX IF NOT EXISTS idx_articles_content_hash ON articles(content_hash)`,
-		`CREATE INDEX IF NOT EXISTS idx_articles_published_at ON articles(published_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_articles_publish_date ON articles(publish_date DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_articles_fetch_time ON articles(fetch_time DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_articles_posted_to_discord ON articles(posted_to_discord)`,
 		`CREATE INDEX IF NOT EXISTS idx_articles_feed_url ON articles(feed_url)`,
+		`CREATE INDEX IF NOT EXISTS idx_articles_created_at ON articles(created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_articles_updated_at ON articles(updated_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS fetch_logs (
 			id SERIAL PRIMARY KEY,
 			feed_url TEXT NOT NULL,

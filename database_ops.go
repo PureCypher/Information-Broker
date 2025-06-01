@@ -526,3 +526,16 @@ func (ops *DatabaseOperations) GetArticleByURL(url string) (*DatabaseArticle, er
 
 	return &article, nil
 }
+
+// GetArticleCount returns the total number of articles in the database
+func (ops *DatabaseOperations) GetArticleCount() (int64, error) {
+	query := `SELECT COUNT(*) FROM articles`
+
+	var count int64
+	err := ops.db.QueryRow(query).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get article count: %w", err)
+	}
+
+	return count, nil
+}

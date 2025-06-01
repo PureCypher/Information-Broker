@@ -1,0 +1,35 @@
+groups:
+  - name: content_volume_alerts
+    rules:
+      - alert: DailyArticleProcessingLow
+        expr: increase(articles_processed_total{status="success"}[1d]) < 5
+        for: 6h
+        labels:
+          severity: warning
+          service: information-broker
+          component: content-volume
+        annotations:
+          summary: "Daily article processing count is below threshold"
+          description: "Only {{ $value }} articles have been successfully processed in the last 24 hours, which is below the expected threshold of 5 articles per day."
+          
+      - alert: NoArticlesProcessedToday
+        expr: increase(articles_processed_total{status="success"}[1d]) == 0
+        for: 3h
+        labels:
+          severity: critical
+          service: information-broker
+          component: content-volume
+        annotations:
+          summary: "No articles processed today"
+          description: "No articles have been successfully processed and written to the database in the last 24 hours."
+          
+      - alert: ArticleDatabaseGrowthStalled
+        expr: increase(articles_processed_total{status="success"}[2d]) == 0
+        for: 1h
+        labels:
+          severity: critical
+          service: information-broker
+          component: content-volume
+        annotations:
+          summary: "Article database growth has stalled"
+          description: "No new articles have been added to the database in the last 2 days, indicating a potential issue with content ingestion."

@@ -111,17 +111,17 @@ func (s *APIServer) getArticles(w http.ResponseWriter, r *http.Request) {
 
 	if feedURL != "" {
 		query = `
-			SELECT title, url, content, published_at, fetched_at, fetch_duration_ms, feed_url, content_hash
-			FROM articles 
+			SELECT title, url, full_content, publish_date, fetch_time, fetch_duration_ms, feed_url, content_hash
+			FROM articles
 			WHERE feed_url = $1
-			ORDER BY published_at DESC 
+			ORDER BY publish_date DESC
 			LIMIT $2 OFFSET $3`
 		args = []interface{}{feedURL, limit, offset}
 	} else {
 		query = `
-			SELECT title, url, content, published_at, fetched_at, fetch_duration_ms, feed_url, content_hash
-			FROM articles 
-			ORDER BY published_at DESC 
+			SELECT title, url, full_content, publish_date, fetch_time, fetch_duration_ms, feed_url, content_hash
+			FROM articles
+			ORDER BY publish_date DESC
 			LIMIT $1 OFFSET $2`
 		args = []interface{}{limit, offset}
 	}
@@ -183,8 +183,8 @@ func (s *APIServer) getLatestArticles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	query := `
-		SELECT title, url, content, published_at, fetched_at, fetch_duration_ms, feed_url, content_hash
-		FROM articles 
+		SELECT title, url, full_content, publish_date, fetch_time, fetch_duration_ms, feed_url, content_hash
+		FROM articles
 		ORDER BY fetched_at DESC 
 		LIMIT $1`
 
@@ -239,8 +239,8 @@ func (s *APIServer) getFeeds(w http.ResponseWriter, r *http.Request) {
 		SELECT 
 			feed_url,
 			COUNT(*) as article_count,
-			MAX(published_at) as latest_article,
-			MIN(published_at) as oldest_article,
+			MAX(publish_date) as latest_article,
+			MIN(publish_date) as oldest_article,
 			AVG(fetch_duration_ms) as avg_fetch_duration_ms
 		FROM articles 
 		GROUP BY feed_url 

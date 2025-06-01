@@ -355,6 +355,7 @@ func (m *RSSMonitor) processArticle(item *gofeed.Item, feedURL string) bool {
 	if err := m.saveArticle(article); err != nil {
 		log.Printf("Failed to save article %s: %v", article.URL, err)
 		m.metrics.RecordArticleProcessed(feedURL, "save_failed")
+		m.metrics.RecordArticleProcessedTotal("failed")
 		return false
 	}
 
@@ -365,6 +366,7 @@ func (m *RSSMonitor) processArticle(item *gofeed.Item, feedURL string) bool {
 
 	// Record successful processing
 	m.metrics.RecordArticleProcessed(feedURL, "processed")
+	m.metrics.RecordArticleProcessedTotal("success")
 
 	log.Printf("New article saved: %s", article.Title)
 
@@ -442,8 +444,8 @@ func (m *RSSMonitor) generateContentHash(title, url, content string) string {
 // saveArticle saves an article to the database
 func (m *RSSMonitor) saveArticle(article Article) error {
 	query := `
-		INSERT INTO articles (title, url, content, published_at, fetch_duration_ms, feed_url, content_hash)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO articles (title, url, full_content, publish_date, fetch_duration_ms, feed_url, content_hash, fetch_time)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
 		ON CONFLICT (url) DO NOTHING`
 
 	_, err := m.db.Exec(query,

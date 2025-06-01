@@ -480,7 +480,7 @@ func (s *SummarizationScheduler) sendDiscordNotification(request SummarizationRe
 func (s *SummarizationScheduler) getArticleDetails(articleURL string) (string, time.Time) {
 	var feedURL string
 	var publishDate time.Time
-	query := `SELECT feed_url, published_at FROM articles WHERE url = $1 LIMIT 1`
+	query := `SELECT feed_url, publish_date FROM articles WHERE url = $1 LIMIT 1`
 
 	if err := s.db.QueryRow(query, articleURL).Scan(&feedURL, &publishDate); err != nil {
 		log.Printf("Failed to get article details for %s: %v", articleURL, err)

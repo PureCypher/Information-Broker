@@ -115,7 +115,7 @@ func Load() *Config {
 			RSSFetchInterval:  getEnvDuration("RSS_FETCH_INTERVAL", 5*time.Minute),
 			RSSFeedsFile:      getEnv("RSS_FEEDS_FILE", "/app/feeds.txt"),
 			LogLevel:          getEnv("LOG_LEVEL", "info"),
-			InitiationDate:    getEnvTime("APP_INITIATION_DATE", time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)),
+			InitiationDate:    getEnvTime("APP_INITIATION_DATE", time.Date(2025, 5, 31, 0, 0, 0, 0, time.UTC)),
 			ArticleCutoffDate: getEnvTime("ARTICLE_CUTOFF_DATE", time.Date(2025, 5, 31, 0, 0, 0, 0, time.UTC)),
 		},
 		API: APIConfig{
