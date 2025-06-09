@@ -87,6 +87,8 @@ services:
       CONTENT_HASH_ALGORITHM: ${CONTENT_HASH_ALGORITHM:-sha256}
     ports:
       - "${APP_PORT:-8080}:8080"
+    volumes:
+      - ./feeds.txt:/app/feeds.txt:ro  # <- MOUNT THE FILE HERE
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
       interval: 30s
