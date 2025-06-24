@@ -444,8 +444,8 @@ func (m *RSSMonitor) generateContentHash(title, url, content string) string {
 // saveArticle saves an article to the database
 func (m *RSSMonitor) saveArticle(article Article) error {
 	query := `
-		INSERT INTO articles (title, url, full_content, publish_date, fetch_duration_ms, feed_url, content_hash, fetch_time)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+		INSERT INTO articles (title, url, full_content, publish_date, fetch_duration_ms, feed_url, content_hash, fetch_time, posted_to_discord)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), FALSE)
 		ON CONFLICT (url) DO NOTHING`
 
 	_, err := m.db.Exec(query,

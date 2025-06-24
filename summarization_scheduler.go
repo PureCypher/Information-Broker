@@ -420,11 +420,43 @@ func (s *SummarizationScheduler) updateArticleSummary(articleURL, summary string
 	return err
 }
 
+// updateArticleDiscordStatus updates the posted_to_discord status in the database
+func (s *SummarizationScheduler) updateArticleDiscordStatus(articleURL string, posted bool) error {
+	query := `UPDATE articles SET posted_to_discord = $1, updated_at = NOW() WHERE url = $2`
+	_, err := s.db.Exec(query, posted, articleURL)
+	return err
+}
+
+// isArticlePostedToDiscord checks if an article has already been posted to Discord
+func (s *SummarizationScheduler) isArticlePostedToDiscord(articleURL string) (bool, error) {
+	var posted bool
+	query := `SELECT posted_to_discord FROM articles WHERE url = $1`
+	err := s.db.QueryRow(query, articleURL).Scan(&posted)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, fmt.Errorf("article not found: %s", articleURL)
+		}
+		return false, err
+	}
+	return posted, nil
+}
+
 // sendDiscordNotification sends Discord notifications to all configured webhooks for a successfully summarized article
 func (s *SummarizationScheduler) sendDiscordNotification(request SummarizationRequest, summary string) {
 	// Get all configured webhook URLs
 	webhookURLs := s.config.Discord.GetWebhookURLs()
 	if len(webhookURLs) == 0 {
+		return
+	}
+
+	// Check if article has already been posted to Discord
+	alreadyPosted, err := s.isArticlePostedToDiscord(request.ArticleURL)
+	if err != nil {
+		log.Printf("Failed to check Discord status for article %s: %v", request.ArticleURL, err)
+		return
+	}
+	if alreadyPosted {
+		log.Printf("Skipping Discord notification for article %s: already posted to Discord", request.ArticleTitle)
 		return
 	}
 
@@ -452,6 +484,9 @@ func (s *SummarizationScheduler) sendDiscordNotification(request SummarizationRe
 
 	// Send to all webhooks concurrently
 	var wg sync.WaitGroup
+	var successCount int64
+	var mu sync.Mutex
+
 	for i, webhookURL := range webhookURLs {
 		wg.Add(1)
 		go func(url string, webhookIndex int) {
@@ -467,13 +502,29 @@ func (s *SummarizationScheduler) sendDiscordNotification(request SummarizationRe
 			} else {
 				log.Printf("Successfully sent Discord notification to webhook %d for article: %s",
 					webhookIndex+1, request.ArticleTitle)
+
+				// Track successful sends
+				mu.Lock()
+				successCount++
+				mu.Unlock()
 			}
 		}(webhookURL, i)
 	}
 
 	// Wait for all webhook calls to complete
 	wg.Wait()
-	log.Printf("Completed sending Discord notifications to %d webhook(s) for article: %s", len(webhookURLs), request.ArticleTitle)
+
+	// Update Discord status only if at least one webhook was successful
+	if successCount > 0 {
+		if err := s.updateArticleDiscordStatus(request.ArticleURL, true); err != nil {
+			log.Printf("Failed to update Discord status for article %s: %v", request.ArticleURL, err)
+		} else {
+			log.Printf("Updated Discord status to posted for article: %s", request.ArticleTitle)
+		}
+	}
+
+	log.Printf("Completed sending Discord notifications to %d webhook(s) for article: %s (successful: %d)",
+		len(webhookURLs), request.ArticleTitle, successCount)
 }
 
 // getArticleDetails retrieves the feed title and publish date for an article URL from the database
