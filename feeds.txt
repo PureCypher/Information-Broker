@@ -45,3 +45,4 @@ https://any.run/cybersecurity-blog/feed/
 https://www.canarytrap.com/feed/
 https://socradar.io/feed
 https://hackread.com/feed/
+https://www.paloaltonetworks.com/blog/feed/
