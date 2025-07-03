@@ -1,4 +1,3 @@
-https://news.ycombinator.com/rss
 https://feeds.feedburner.com/TechCrunch
 https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml
 https://threatpost.com/feed/
@@ -46,3 +45,6 @@ https://www.canarytrap.com/feed/
 https://socradar.io/feed
 https://hackread.com/feed/
 https://www.paloaltonetworks.com/blog/feed/
+https://www.infostealers.com/learn-info-stealers/feed/
+https://www.infostealers.com/info-stealers-reports/feed/
+https://www.infostealers.com/info-stealers-techniques/feed/
