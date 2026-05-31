@@ -37,6 +37,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      flaresolverr:
+        condition: service_started
     environment:
       # Database Configuration
       DB_HOST: postgres
@@ -54,6 +56,10 @@ services:
       # API Configuration
       API_TIMEOUT: ${API_TIMEOUT:-30s}
       API_USER_AGENT: ${API_USER_AGENT:-Information-Broker/1.0}
+
+      # FlareSolverr (Cloudflare challenge solver) Configuration
+      FLARESOLVERR_URL: ${FLARESOLVERR_URL:-http://flaresolverr:8191/v1}
+      FLARESOLVERR_TIMEOUT: ${FLARESOLVERR_TIMEOUT:-60s}
       
       # OLLAMA Configuration
       OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
@@ -108,6 +114,22 @@ services:
         max-size: "100m"
         max-file: "3"
 
+  # FlareSolverr - headless-browser proxy that solves Cloudflare/WAF challenges
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: information-broker-flaresolverr
+    environment:
+      LOG_LEVEL: ${FLARESOLVERR_LOG_LEVEL:-info}
+      TZ: ${TZ:-UTC}
+    restart: unless-stopped
+    networks:
+      - app-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
   # Prometheus Monitoring
   prometheus:
     image: prom/prometheus:v2.47.0
@@ -149,7 +171,7 @@ services:
     environment:
       # Security
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
-      GF_SECURITY_SECRET_KEY: ${GRAFANA_SECRET_KEY:-SW2YcwTIb9zpOOhoPsMm}
+      GF_SECURITY_SECRET_KEY: ${GRAFANA_SECRET_KEY:?GRAFANA_SECRET_KEY must be set in .env}
       
       # Users
       GF_USERS_ALLOW_SIGN_UP: ${GRAFANA_ALLOW_SIGNUP:-false}

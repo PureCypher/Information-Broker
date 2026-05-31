@@ -1,12 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"information-broker/config"
+	"io"
 	"log"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
@@ -52,6 +57,16 @@ func NewRSSMonitor(db *sql.DB, feeds []string, metrics *PrometheusMetrics, cfg *
 		fetchInterval: cfg.App.RSSFetchInterval,
 		httpClient: &http.Client{
 			Timeout: cfg.API.Timeout,
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 5,
+				MaxConnsPerHost:     10,
+				IdleConnTimeout:     90 * time.Second,
+				DialContext: (&net.Dialer{
+					Timeout:   10 * time.Second,
+					KeepAlive: 30 * time.Second,
+				}).DialContext,
+			},
 		},
 		parser:          gofeed.NewParser(),
 		metrics:         metrics,
@@ -99,21 +114,29 @@ func (m *RSSMonitor) loadExistingArticles() error {
 	}
 	defer rows.Close()
 
-	count := 0
-	m.mutex.Lock()
+	// Build a local slice first to avoid holding the write lock during I/O
+	var urls []string
 	for rows.Next() {
 		var url string
 		if err := rows.Scan(&url); err != nil {
 			log.Printf("Error scanning article URL: %v", err)
 			continue
 		}
+		urls = append(urls, url)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	// Populate the map under lock in a tight loop — no I/O
+	m.mutex.Lock()
+	for _, url := range urls {
 		m.seenArticles[url] = true
-		count++
 	}
 	m.mutex.Unlock()
 
-	log.Printf("Loaded %d existing articles for deduplication", count)
-	return rows.Err()
+	log.Printf("Loaded %d existing articles for deduplication", len(urls))
+	return nil
 }
 
 // fetchAllFeeds fetches all RSS feeds concurrently
@@ -199,6 +222,12 @@ func (m *RSSMonitor) doFetchFeed(ctx context.Context, feedURL string, startTime 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		// Cloudflare and similar WAFs answer with 403 plus a JS/TLS challenge that
+		// a plain Go HTTP client cannot pass. If a challenge solver is configured,
+		// retry the fetch through it before giving up.
+		if resp.StatusCode == http.StatusForbidden && m.config.FlareSolverr.URL != "" {
+			return m.fetchViaFlareSolverr(ctx, feedURL, startTime)
+		}
 		duration := time.Since(startTime)
 		err := fmt.Errorf("HTTP %d", resp.StatusCode)
 		m.logFetch(feedURL, "error", err.Error(), duration, 0, 0)
@@ -217,6 +246,12 @@ func (m *RSSMonitor) doFetchFeed(ctx context.Context, feedURL string, startTime 
 		return err
 	}
 
+	return m.processFeedItems(ctx, feedURL, feed, startTime)
+}
+
+// processFeedItems sorts and processes a parsed feed's items and records success
+// metrics. It is shared by the direct fetch path and the FlareSolverr fallback.
+func (m *RSSMonitor) processFeedItems(ctx context.Context, feedURL string, feed *gofeed.Feed, startTime time.Time) error {
 	// Process articles
 	newArticles := 0
 	totalArticles := len(feed.Items)
@@ -277,6 +312,123 @@ func (m *RSSMonitor) doFetchFeed(ctx context.Context, feedURL string, startTime 
 	return nil
 }
 
+// flareSolverrResponse models the subset of the FlareSolverr v1 API response we use.
+type flareSolverrResponse struct {
+	Status   string `json:"status"`
+	Message  string `json:"message"`
+	Solution struct {
+		Status   int    `json:"status"`
+		Response string `json:"response"`
+	} `json:"solution"`
+}
+
+// fetchViaFlareSolverr retries a blocked feed through a FlareSolverr instance,
+// which uses a headless browser to pass Cloudflare/WAF challenges. The browser
+// returns a rendered DOM, so the raw feed XML is extracted before parsing.
+func (m *RSSMonitor) fetchViaFlareSolverr(ctx context.Context, feedURL string, startTime time.Time) error {
+	log.Printf("Feed %s: HTTP 403, retrying via FlareSolverr", feedURL)
+
+	payload, err := json.Marshal(map[string]interface{}{
+		"cmd":        "request.get",
+		"url":        feedURL,
+		"maxTimeout": int(m.config.FlareSolverr.Timeout / time.Millisecond),
+	})
+	if err != nil {
+		return m.flareError(feedURL, startTime, fmt.Sprintf("marshal request: %v", err))
+	}
+
+	// Allow the solver its full maxTimeout plus headroom for browser startup.
+	reqCtx, cancel := context.WithTimeout(ctx, m.config.FlareSolverr.Timeout+30*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, "POST", m.config.FlareSolverr.URL, bytes.NewReader(payload))
+	if err != nil {
+		return m.flareError(feedURL, startTime, fmt.Sprintf("create request: %v", err))
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: m.config.FlareSolverr.Timeout + 30*time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return m.flareError(feedURL, startTime, fmt.Sprintf("request failed: %v", err))
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return m.flareError(feedURL, startTime, fmt.Sprintf("read response: %v", err))
+	}
+
+	var fsResp flareSolverrResponse
+	if err := json.Unmarshal(raw, &fsResp); err != nil {
+		return m.flareError(feedURL, startTime, fmt.Sprintf("decode response: %v", err))
+	}
+	if fsResp.Status != "ok" {
+		return m.flareError(feedURL, startTime, fmt.Sprintf("solver status %q: %s", fsResp.Status, fsResp.Message))
+	}
+	if fsResp.Solution.Status != http.StatusOK {
+		return m.flareError(feedURL, startTime, fmt.Sprintf("solved with HTTP %d", fsResp.Solution.Status))
+	}
+
+	feed, err := m.parser.ParseString(extractFeedXML(fsResp.Solution.Response))
+	if err != nil {
+		return m.flareError(feedURL, startTime, fmt.Sprintf("parse solved feed: %v", err))
+	}
+
+	log.Printf("Feed %s: solved via FlareSolverr (%d items)", feedURL, len(feed.Items))
+	return m.processFeedItems(ctx, feedURL, feed, startTime)
+}
+
+// flareError centralises error logging and metrics for the FlareSolverr path.
+func (m *RSSMonitor) flareError(feedURL string, startTime time.Time, msg string) error {
+	full := "FlareSolverr: " + msg
+	duration := time.Since(startTime)
+	m.logFetch(feedURL, "error", full, duration, 0, 0)
+	m.metrics.RecordRSSFetch(feedURL, "error", duration)
+	m.metrics.RecordRSSFetchError(feedURL, "flaresolverr_failed")
+	return fmt.Errorf("%s", full)
+}
+
+// extractFeedXML pulls raw feed XML out of the HTML document returned by
+// FlareSolverr's headless browser. Chrome renders raw XML inside a <pre>
+// element with the markup HTML-escaped (&lt;rss&gt;...), so the entities must
+// be decoded before the feed can be parsed.
+func extractFeedXML(s string) string {
+	trimmed := strings.TrimSpace(s)
+	if strings.HasPrefix(trimmed, "<?xml") || strings.HasPrefix(trimmed, "<rss") || strings.HasPrefix(trimmed, "<feed") {
+		return trimmed
+	}
+
+	if doc, derr := goquery.NewDocumentFromReader(strings.NewReader(s)); derr == nil {
+		// Older Chrome kept an unrendered copy of the source here.
+		if sel := doc.Find("#webkit-xml-viewer-source-xml"); sel.Length() > 0 {
+			if inner, herr := sel.Html(); herr == nil && strings.Contains(inner, "<") {
+				return strings.TrimSpace(inner)
+			}
+		}
+		// Modern Chrome shows the escaped source in a <pre>; Text() decodes it.
+		if pre := doc.Find("pre"); pre.Length() > 0 {
+			if text := strings.TrimSpace(pre.First().Text()); text != "" {
+				return text
+			}
+		}
+		// Last resort: the decoded text of the whole body.
+		if body := strings.TrimSpace(doc.Find("body").Text()); body != "" {
+			return body
+		}
+	}
+
+	// Fallback: slice from the first feed root element to its matching close tag.
+	for _, tag := range [][2]string{{"<rss", "</rss>"}, {"<feed", "</feed>"}} {
+		if start := strings.Index(s, tag[0]); start != -1 {
+			if end := strings.LastIndex(s, tag[1]); end != -1 && end > start {
+				return s[start : end+len(tag[1])]
+			}
+		}
+	}
+	return trimmed
+}
+
 // processArticle processes a single article from an RSS feed
 func (m *RSSMonitor) processArticle(item *gofeed.Item, feedURL string) bool {
 	if item.Link == "" {
@@ -295,40 +447,40 @@ func (m *RSSMonitor) processArticle(item *gofeed.Item, feedURL string) bool {
 		return false
 	}
 
-	// Check publication date against the cutoff date (2025-05-31T00:00:00Z)
+	// Check publication date against the cutoff date — skip silently (metrics track these)
 	cutoffDate := m.config.App.ArticleCutoffDate.UTC()
 	if publishDate.Before(cutoffDate) {
-		log.Printf("Skipping article published before cutoff date: %s (published: %s, cutoff: %s)",
-			item.Title, publishDate.Format("2006-01-02T15:04:05Z"), cutoffDate.Format("2006-01-02T15:04:05Z"))
 		m.metrics.RecordArticleFilteredPreCutoff(feedURL)
 		m.metrics.RecordArticleProcessed(feedURL, "skipped_before_cutoff")
 		return false
 	}
 
-	// Check publication date against initiation date (keep existing logic for backward compatibility)
+	// Check publication date against initiation date
 	if publishDate.Before(m.config.App.InitiationDate) {
 		m.metrics.RecordArticleProcessed(feedURL, "skipped_before_initiation")
-		log.Printf("Skipping article published before initiation date: %s (published: %s, initiation: %s)",
-			item.Title, publishDate.Format("2006-01-02"), m.config.App.InitiationDate.Format("2006-01-02"))
 		return false
 	}
 
 	// Article passed the cutoff date filter
 	m.metrics.RecordArticleProcessedPostCutoff(feedURL)
 
-	// Check if we've already seen this article
-	m.mutex.RLock()
-	seen := m.seenArticles[item.Link]
-	m.mutex.RUnlock()
-
-	if seen {
+	// Check-and-set under write lock to prevent concurrent goroutines
+	// from processing the same URL simultaneously
+	m.mutex.Lock()
+	if m.seenArticles[item.Link] {
+		m.mutex.Unlock()
 		m.metrics.RecordArticleProcessed(feedURL, "skipped_duplicate")
 		return false // Already processed
 	}
+	// Mark as seen immediately to prevent duplicate processing by concurrent goroutines
+	m.seenArticles[item.Link] = true
+	m.mutex.Unlock()
 
-	// Fetch full content
+	// Fetch full content with context for graceful shutdown
+	fetchCtx, fetchCancel := context.WithTimeout(context.Background(), m.config.API.Timeout)
+	defer fetchCancel()
 	startTime := time.Now()
-	content, err := m.fetchFullContent(item.Link)
+	content, err := m.fetchFullContent(fetchCtx, item.Link)
 	fetchDuration := time.Since(startTime)
 
 	if err != nil {
@@ -356,13 +508,12 @@ func (m *RSSMonitor) processArticle(item *gofeed.Item, feedURL string) bool {
 		log.Printf("Failed to save article %s: %v", article.URL, err)
 		m.metrics.RecordArticleProcessed(feedURL, "save_failed")
 		m.metrics.RecordArticleProcessedTotal("failed")
+		// Unmark on failure so it can be retried next cycle
+		m.mutex.Lock()
+		delete(m.seenArticles, item.Link)
+		m.mutex.Unlock()
 		return false
 	}
-
-	// Mark as seen
-	m.mutex.Lock()
-	m.seenArticles[item.Link] = true
-	m.mutex.Unlock()
 
 	// Record successful processing
 	m.metrics.RecordArticleProcessed(feedURL, "processed")
@@ -377,8 +528,8 @@ func (m *RSSMonitor) processArticle(item *gofeed.Item, feedURL string) bool {
 }
 
 // fetchFullContent attempts to fetch the full content of an article
-func (m *RSSMonitor) fetchFullContent(url string) (string, error) {
-	req, err := http.NewRequest("GET", url, nil)
+func (m *RSSMonitor) fetchFullContent(ctx context.Context, url string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return "", err
 	}
@@ -437,8 +588,10 @@ func (m *RSSMonitor) fetchFullContent(url string) (string, error) {
 // generateContentHash creates a unique hash for content deduplication
 func (m *RSSMonitor) generateContentHash(title, url, content string) string {
 	hasher := sha256.New()
-	hasher.Write([]byte(title + url + content))
-	return fmt.Sprintf("%x", hasher.Sum(nil))
+	hasher.Write([]byte(title))
+	hasher.Write([]byte(url))
+	hasher.Write([]byte(content))
+	return hex.EncodeToString(hasher.Sum(nil))
 }
 
 // saveArticle saves an article to the database

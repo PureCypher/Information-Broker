@@ -20,6 +20,7 @@ type Config struct {
 	Performance   PerformanceConfig
 	Content       ContentConfig
 	Summarization SummarizationConfig
+	FlareSolverr  FlareSolverrConfig
 }
 
 // DatabaseConfig holds database-related configuration
@@ -45,6 +46,14 @@ type AppConfig struct {
 type APIConfig struct {
 	Timeout   time.Duration
 	UserAgent string
+}
+
+// FlareSolverrConfig holds settings for the optional FlareSolverr challenge
+// solver, used to fetch feeds behind Cloudflare/WAF protection. An empty URL
+// disables the feature.
+type FlareSolverrConfig struct {
+	URL     string
+	Timeout time.Duration
 }
 
 // OLLAMAConfig holds OLLAMA AI service configuration
@@ -121,6 +130,10 @@ func Load() *Config {
 		API: APIConfig{
 			Timeout:   getEnvDuration("API_TIMEOUT", 30*time.Second),
 			UserAgent: getEnv("API_USER_AGENT", "Information-Broker/1.0"),
+		},
+		FlareSolverr: FlareSolverrConfig{
+			URL:     getEnv("FLARESOLVERR_URL", ""),
+			Timeout: getEnvDuration("FLARESOLVERR_TIMEOUT", 60*time.Second),
 		},
 		OLLAMA: OLLAMAConfig{
 			URL:        getEnv("OLLAMA_URL", "http://localhost:11434"),
