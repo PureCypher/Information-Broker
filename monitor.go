@@ -603,7 +603,9 @@ func (m *RSSMonitor) fetchFullContent(ctx context.Context, url string) (string, 
 	// Clean up the content
 	content = strings.TrimSpace(content)
 	if len(content) > m.config.Performance.MaxArticleContentLength { // Limit content length
-		content = content[:m.config.Performance.MaxArticleContentLength] + "..."
+		// Truncate on a rune boundary; byte-slicing can split a multi-byte
+		// character and leave invalid UTF-8 that PostgreSQL rejects on save.
+		content = safeTruncate(content, m.config.Performance.MaxArticleContentLength) + "..."
 	}
 
 	return content, nil
@@ -625,13 +627,16 @@ func (m *RSSMonitor) saveArticle(article Article) error {
 		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), FALSE)
 		ON CONFLICT (url) DO NOTHING`
 
+	// Strip any invalid UTF-8 before insert: a single bad byte makes PostgreSQL
+	// reject the whole row ("invalid byte sequence for encoding UTF8"), silently
+	// dropping the article. Covers both truncation- and source-induced bad bytes.
 	_, err := m.db.Exec(query,
-		article.Title,
-		article.URL,
-		article.Content,
+		sanitizeUTF8(article.Title),
+		sanitizeUTF8(article.URL),
+		sanitizeUTF8(article.Content),
 		article.PublishedAt,
 		article.FetchDuration.Milliseconds(),
-		article.FeedURL,
+		sanitizeUTF8(article.FeedURL),
 		article.ContentHash,
 	)
 
