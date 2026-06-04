@@ -18,14 +18,6 @@ scrape_configs:
     scrape_timeout: 10s
     params:
       format: ['prometheus']
-
-  - job_name: 'information-broker-health'
-    static_configs:
-      - targets: ['rss-monitor:8080']
-    metrics_path: '/health'
-    scrape_interval: 15s
-    scrape_timeout: 5s
-    metric_relabel_configs:
-      - source_labels: [__name__]
-        regex: 'up|probe_.*'
-        action: keep
+    # Liveness is derived from this job's `up` series. (A separate /health job
+    # was removed: /health returns JSON, which Prometheus cannot parse as
+    # metrics, so it produced a permanently-down target.)

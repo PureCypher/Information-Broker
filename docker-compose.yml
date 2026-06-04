@@ -96,7 +96,9 @@ services:
     volumes:
       - ./feeds.txt:/app/feeds.txt:ro  # <- MOUNT THE FILE HERE
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      # The runtime image is built FROM scratch (no shell/wget/curl), so the
+      # binary probes its own /health endpoint via the -health-check flag.
+      test: ["CMD", "/app/information-broker", "-health-check"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -185,7 +187,10 @@ services:
       
       # Logging
       GF_LOG_LEVEL: ${GRAFANA_LOG_LEVEL:-info}
-      
+
+      # Default landing page: the consolidated Operations Overview dashboard
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/information-broker-overview.json
+
       # Database (use SQLite for simplicity)
       GF_DATABASE_TYPE: sqlite3
       GF_DATABASE_PATH: /var/lib/grafana/grafana.db
