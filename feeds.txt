@@ -19,7 +19,6 @@ https://www.tripwire.com/state-of-security/feed/
 https://www.cyberdefensemagazine.com/feed/
 https://www.bleepingcomputer.com/feed/
 https://www.securityledger.com/feed/
-https://www.cisecurity.org/feed/
 https://therecord.media/feed
 https://www.cybersecuritydive.com/feeds/news/
 https://intel471.com/blog/feed
@@ -38,7 +37,6 @@ https://www.securitynewspaper.com/feed/
 https://www.sophos.com/en-us/resources/feed
 https://www.nist.gov/blogs/cybersecurity-insights/rss.xml
 https://www.proofpoint.com/us/rss.xml
-https://www.binarydefense.com/feed/
 https://socprime.com/feed/
 https://any.run/cybersecurity-blog/feed/
 https://www.canarytrap.com/feed/
