@@ -213,6 +213,15 @@ func (m *RSSMonitor) doFetchFeed(ctx context.Context, feedURL string, startTime 
 	// Fetch the feed
 	resp, err := m.httpClient.Do(req)
 	if err != nil {
+		// Cloudflare and similar WAFs frequently block non-browser clients at the
+		// transport layer (TLS handshake, HTTP/2 RST_STREAM, connection reset)
+		// instead of returning 403, so the status-code check below never runs.
+		// Retry through the challenge solver before giving up, unless we are
+		// shutting down (context cancelled/expired), in which case a retry is
+		// pointless.
+		if m.config.FlareSolverr.URL != "" && ctx.Err() == nil {
+			return m.fetchViaFlareSolverr(ctx, feedURL, startTime)
+		}
 		duration := time.Since(startTime)
 		m.logFetch(feedURL, "error", fmt.Sprintf("Failed to fetch feed: %v", err), duration, 0, 0)
 		m.metrics.RecordRSSFetch(feedURL, "error", duration)
@@ -222,10 +231,11 @@ func (m *RSSMonitor) doFetchFeed(ctx context.Context, feedURL string, startTime 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		// Cloudflare and similar WAFs answer with 403 plus a JS/TLS challenge that
-		// a plain Go HTTP client cannot pass. If a challenge solver is configured,
-		// retry the fetch through it before giving up.
-		if resp.StatusCode == http.StatusForbidden && m.config.FlareSolverr.URL != "" {
+		// Cloudflare and similar WAFs answer with a challenge status (403, and
+		// sometimes 429/503 or Cloudflare's 520-527 origin codes) plus a JS/TLS
+		// challenge that a plain Go HTTP client cannot pass. If a challenge solver
+		// is configured, retry the fetch through it before giving up.
+		if m.config.FlareSolverr.URL != "" && isChallengeStatus(resp.StatusCode) {
 			return m.fetchViaFlareSolverr(ctx, feedURL, startTime)
 		}
 		duration := time.Since(startTime)
@@ -247,6 +257,20 @@ func (m *RSSMonitor) doFetchFeed(ctx context.Context, feedURL string, startTime 
 	}
 
 	return m.processFeedItems(ctx, feedURL, feed, startTime)
+}
+
+// isChallengeStatus reports whether an HTTP status code likely indicates a
+// WAF/CDN challenge (Cloudflare et al.) that a headless-browser solver such as
+// FlareSolverr can bypass, as opposed to a genuine client/server error.
+func isChallengeStatus(code int) bool {
+	switch code {
+	case http.StatusForbidden, // 403
+		http.StatusTooManyRequests,    // 429
+		http.StatusServiceUnavailable: // 503
+		return true
+	}
+	// Cloudflare's non-standard origin-unreachable / challenge codes.
+	return code >= 520 && code <= 527
 }
 
 // processFeedItems sorts and processes a parsed feed's items and records success
@@ -579,7 +603,9 @@ func (m *RSSMonitor) fetchFullContent(ctx context.Context, url string) (string, 
 	// Clean up the content
 	content = strings.TrimSpace(content)
 	if len(content) > m.config.Performance.MaxArticleContentLength { // Limit content length
-		content = content[:m.config.Performance.MaxArticleContentLength] + "..."
+		// Truncate on a rune boundary; byte-slicing can split a multi-byte
+		// character and leave invalid UTF-8 that PostgreSQL rejects on save.
+		content = safeTruncate(content, m.config.Performance.MaxArticleContentLength) + "..."
 	}
 
 	return content, nil
@@ -601,13 +627,16 @@ func (m *RSSMonitor) saveArticle(article Article) error {
 		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), FALSE)
 		ON CONFLICT (url) DO NOTHING`
 
+	// Strip any invalid UTF-8 before insert: a single bad byte makes PostgreSQL
+	// reject the whole row ("invalid byte sequence for encoding UTF8"), silently
+	// dropping the article. Covers both truncation- and source-induced bad bytes.
 	_, err := m.db.Exec(query,
-		article.Title,
-		article.URL,
-		article.Content,
+		sanitizeUTF8(article.Title),
+		sanitizeUTF8(article.URL),
+		sanitizeUTF8(article.Content),
 		article.PublishedAt,
 		article.FetchDuration.Milliseconds(),
-		article.FeedURL,
+		sanitizeUTF8(article.FeedURL),
 		article.ContentHash,
 	)
 
