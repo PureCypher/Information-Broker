@@ -213,6 +213,15 @@ func (m *RSSMonitor) doFetchFeed(ctx context.Context, feedURL string, startTime 
 	// Fetch the feed
 	resp, err := m.httpClient.Do(req)
 	if err != nil {
+		// Cloudflare and similar WAFs frequently block non-browser clients at the
+		// transport layer (TLS handshake, HTTP/2 RST_STREAM, connection reset)
+		// instead of returning 403, so the status-code check below never runs.
+		// Retry through the challenge solver before giving up, unless we are
+		// shutting down (context cancelled/expired), in which case a retry is
+		// pointless.
+		if m.config.FlareSolverr.URL != "" && ctx.Err() == nil {
+			return m.fetchViaFlareSolverr(ctx, feedURL, startTime)
+		}
 		duration := time.Since(startTime)
 		m.logFetch(feedURL, "error", fmt.Sprintf("Failed to fetch feed: %v", err), duration, 0, 0)
 		m.metrics.RecordRSSFetch(feedURL, "error", duration)
@@ -222,10 +231,11 @@ func (m *RSSMonitor) doFetchFeed(ctx context.Context, feedURL string, startTime 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		// Cloudflare and similar WAFs answer with 403 plus a JS/TLS challenge that
-		// a plain Go HTTP client cannot pass. If a challenge solver is configured,
-		// retry the fetch through it before giving up.
-		if resp.StatusCode == http.StatusForbidden && m.config.FlareSolverr.URL != "" {
+		// Cloudflare and similar WAFs answer with a challenge status (403, and
+		// sometimes 429/503 or Cloudflare's 520-527 origin codes) plus a JS/TLS
+		// challenge that a plain Go HTTP client cannot pass. If a challenge solver
+		// is configured, retry the fetch through it before giving up.
+		if m.config.FlareSolverr.URL != "" && isChallengeStatus(resp.StatusCode) {
 			return m.fetchViaFlareSolverr(ctx, feedURL, startTime)
 		}
 		duration := time.Since(startTime)
@@ -247,6 +257,20 @@ func (m *RSSMonitor) doFetchFeed(ctx context.Context, feedURL string, startTime 
 	}
 
 	return m.processFeedItems(ctx, feedURL, feed, startTime)
+}
+
+// isChallengeStatus reports whether an HTTP status code likely indicates a
+// WAF/CDN challenge (Cloudflare et al.) that a headless-browser solver such as
+// FlareSolverr can bypass, as opposed to a genuine client/server error.
+func isChallengeStatus(code int) bool {
+	switch code {
+	case http.StatusForbidden, // 403
+		http.StatusTooManyRequests,    // 429
+		http.StatusServiceUnavailable: // 503
+		return true
+	}
+	// Cloudflare's non-standard origin-unreachable / challenge codes.
+	return code >= 520 && code <= 527
 }
 
 // processFeedItems sorts and processes a parsed feed's items and records success

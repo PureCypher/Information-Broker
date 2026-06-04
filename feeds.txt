@@ -35,7 +35,7 @@ https://www.grahamcluley.com/feed/
 https://www.databreachtoday.com/rss-feeds
 https://www.theregister.com/security/headlines.atom
 https://www.securitynewspaper.com/feed/
-https://news.sophos.com/en-us/feed/
+https://www.sophos.com/en-us/resources/feed
 https://www.nist.gov/blogs/cybersecurity-insights/rss.xml
 https://www.proofpoint.com/us/rss.xml
 https://www.binarydefense.com/feed/
