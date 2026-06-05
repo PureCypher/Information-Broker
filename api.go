@@ -57,6 +57,7 @@ func (s *APIServer) Start() {
 	// Routes with metrics middleware
 	mux.HandleFunc("/articles", corsHandler(s.metrics.HTTPMetricsMiddleware(s.getArticles, "/articles")))
 	mux.HandleFunc("/articles/latest", corsHandler(s.metrics.HTTPMetricsMiddleware(s.getLatestArticles, "/articles/latest")))
+	mux.HandleFunc("/articles/get", corsHandler(s.metrics.HTTPMetricsMiddleware(s.getArticleByID, "/articles/get")))
 	mux.HandleFunc("/feeds", corsHandler(s.metrics.HTTPMetricsMiddleware(s.getFeeds, "/feeds")))
 	mux.HandleFunc("/stats", corsHandler(s.metrics.HTTPMetricsMiddleware(s.getStats, "/stats")))
 	mux.HandleFunc("/summarization/stats", corsHandler(s.metrics.HTTPMetricsMiddleware(s.getSummarizationStats, "/summarization/stats")))
@@ -193,6 +194,63 @@ func (s *APIServer) getArticles(w http.ResponseWriter, r *http.Request) {
 		"limit":    limit,
 		"offset":   offset,
 	})
+}
+
+// parseArticleID validates and parses an article id query value.
+func parseArticleID(s string) (int64, error) {
+	if s == "" {
+		return 0, fmt.Errorf("missing id")
+	}
+	id, err := strconv.ParseInt(s, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, fmt.Errorf("invalid id: %q", s)
+	}
+	return id, nil
+}
+
+// getArticleByID returns a single article (incl. summary + full content) by id.
+func (s *APIServer) getArticleByID(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	id, err := parseArticleID(r.URL.Query().Get("id"))
+	if err != nil {
+		http.Error(w, "Invalid id", http.StatusBadRequest)
+		return
+	}
+
+	query := `SELECT id, title, url, summary, full_content, publish_date, fetch_duration_ms, feed_url, content_hash
+		FROM articles WHERE id = $1`
+
+	var article ArticleView
+	var fetchDurationMs int64
+	err = s.db.QueryRow(query, id).Scan(
+		&article.ID,
+		&article.Title,
+		&article.URL,
+		&article.Summary,
+		&article.Content,
+		&article.PublishedAt,
+		&fetchDurationMs,
+		&article.FeedURL,
+		&article.ContentHash,
+	)
+	if err == sql.ErrNoRows {
+		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		log.Printf("Database query error: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	article.FetchDuration = time.Duration(fetchDurationMs) * time.Millisecond
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(article)
 }
 
 // getLatestArticles returns the most recent articles across all feeds
