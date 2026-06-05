@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -80,6 +81,46 @@ func (s *APIServer) Start() {
 	}
 }
 
+// ArticleView is the JSON representation of an article returned by the API.
+type ArticleView struct {
+	ID            int64         `json:"id"`
+	Title         string        `json:"title"`
+	URL           string        `json:"url"`
+	Summary       *string       `json:"summary"`
+	Content       string        `json:"content"`
+	PublishedAt   time.Time     `json:"published_at"`
+	FetchDuration time.Duration `json:"fetch_duration"`
+	FeedURL       string        `json:"feed_url"`
+	ContentHash   string        `json:"content_hash"`
+}
+
+// buildArticlesQuery constructs the SQL and ordered args for listing articles,
+// applying optional feed and case-insensitive search (q) filters.
+func buildArticlesQuery(feed, q string, limit, offset int) (string, []interface{}) {
+	query := `SELECT id, title, url, summary, full_content, publish_date, fetch_duration_ms, feed_url, content_hash
+		FROM articles`
+	var conds []string
+	var args []interface{}
+	i := 1
+	if feed != "" {
+		conds = append(conds, fmt.Sprintf("feed_url = $%d", i))
+		args = append(args, feed)
+		i++
+	}
+	if q != "" {
+		conds = append(conds, fmt.Sprintf("(title ILIKE $%d OR summary ILIKE $%d OR full_content ILIKE $%d)", i, i+1, i+2))
+		like := "%" + q + "%"
+		args = append(args, like, like, like)
+		i += 3
+	}
+	if len(conds) > 0 {
+		query += " WHERE " + strings.Join(conds, " AND ")
+	}
+	query += fmt.Sprintf(" ORDER BY publish_date DESC LIMIT $%d OFFSET $%d", i, i+1)
+	args = append(args, limit, offset)
+	return query, args
+}
+
 // getArticles returns paginated articles
 func (s *APIServer) getArticles(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -104,27 +145,9 @@ func (s *APIServer) getArticles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	feedURL := r.URL.Query().Get("feed")
+	searchQ := r.URL.Query().Get("q")
 
-	// Build query
-	var query string
-	var args []interface{}
-
-	if feedURL != "" {
-		query = `
-			SELECT title, url, full_content, publish_date, fetch_time, fetch_duration_ms, feed_url, content_hash
-			FROM articles
-			WHERE feed_url = $1
-			ORDER BY publish_date DESC
-			LIMIT $2 OFFSET $3`
-		args = []interface{}{feedURL, limit, offset}
-	} else {
-		query = `
-			SELECT title, url, full_content, publish_date, fetch_time, fetch_duration_ms, feed_url, content_hash
-			FROM articles
-			ORDER BY publish_date DESC
-			LIMIT $1 OFFSET $2`
-		args = []interface{}{limit, offset}
-	}
+	query, args := buildArticlesQuery(feedURL, searchQ, limit, offset)
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -134,18 +157,18 @@ func (s *APIServer) getArticles(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rows.Close()
 
-	var articles []Article
+	articles := []ArticleView{}
 	for rows.Next() {
-		var article Article
+		var article ArticleView
 		var fetchDurationMs int64
-		var fetchedAt time.Time
 
 		err := rows.Scan(
+			&article.ID,
 			&article.Title,
 			&article.URL,
+			&article.Summary,
 			&article.Content,
 			&article.PublishedAt,
-			&fetchedAt,
 			&fetchDurationMs,
 			&article.FeedURL,
 			&article.ContentHash,
