@@ -66,10 +66,11 @@ type OLLAMAConfig struct {
 
 // DiscordConfig holds Discord webhook configuration
 type DiscordConfig struct {
-	WebhookURL  string   // Deprecated: Use WebhookURLs for multiple webhooks
-	WebhookURLs []string // Multiple webhook URLs for multi-cast notifications
-	MaxRetries  int
-	Timeout     time.Duration
+	WebhookURL    string   // Deprecated: Use WebhookURLs for multiple webhooks
+	WebhookURLs   []string // Multiple webhook URLs for multi-cast notifications
+	ExcludedFeeds []string // Feed-URL substrings whose articles are never posted to Discord
+	MaxRetries    int
+	Timeout       time.Duration
 }
 
 // PrometheusConfig holds Prometheus metrics configuration
@@ -142,10 +143,11 @@ func Load() *Config {
 			MaxRetries: getEnvInt("OLLAMA_MAX_RETRIES", 3),
 		},
 		Discord: DiscordConfig{
-			WebhookURL:  getEnv("DISCORD_WEBHOOK_URL", ""),
-			WebhookURLs: getEnvStringSlice("DISCORD_WEBHOOK_URLS", []string{}),
-			MaxRetries:  getEnvInt("DISCORD_MAX_RETRIES", 2),
-			Timeout:     getEnvDuration("DISCORD_TIMEOUT", 30*time.Second),
+			WebhookURL:    getEnv("DISCORD_WEBHOOK_URL", ""),
+			WebhookURLs:   getEnvStringSlice("DISCORD_WEBHOOK_URLS", []string{}),
+			ExcludedFeeds: getEnvStringSlice("DISCORD_EXCLUDED_FEEDS", []string{}),
+			MaxRetries:    getEnvInt("DISCORD_MAX_RETRIES", 2),
+			Timeout:       getEnvDuration("DISCORD_TIMEOUT", 30*time.Second),
 		},
 		Prometheus: PrometheusConfig{
 			MetricsPath: getEnv("PROMETHEUS_METRICS_PATH", "/metrics"),
@@ -250,6 +252,24 @@ func (d *DiscordConfig) GetWebhookURLs() []string {
 
 	// No webhooks configured
 	return []string{}
+}
+
+// IsFeedExcluded reports whether articles from the given feed URL should be
+// suppressed from Discord notifications. Matching is a case-insensitive
+// substring test against each configured exclusion entry, so an entry like
+// "cvefeed.io" matches "https://cvefeed.io/rssfeed/latest.xml".
+func (d *DiscordConfig) IsFeedExcluded(feedURL string) bool {
+	if feedURL == "" || len(d.ExcludedFeeds) == 0 {
+		return false
+	}
+	haystack := strings.ToLower(feedURL)
+	for _, excluded := range d.ExcludedFeeds {
+		needle := strings.ToLower(strings.TrimSpace(excluded))
+		if needle != "" && strings.Contains(haystack, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 // GetConnectionString returns the database connection string

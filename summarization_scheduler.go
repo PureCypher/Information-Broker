@@ -461,7 +461,14 @@ func (s *SummarizationScheduler) sendDiscordNotification(request SummarizationRe
 	}
 
 	// Get article details from database
-	feedTitle, publishDate := s.getArticleDetails(request.ArticleURL)
+	feedURL, feedTitle, publishDate := s.getArticleDetails(request.ArticleURL)
+
+	// Skip feeds the operator has excluded from Discord (e.g. high-volume CVE
+	// feeds). The article is still stored and summarized; it is just never posted.
+	if s.config.Discord.IsFeedExcluded(feedURL) {
+		log.Printf("Skipping Discord notification for article %s: feed %q is excluded from Discord", request.ArticleTitle, feedURL)
+		return
+	}
 
 	// Check if article was published before the cutoff date
 	cutoffDate := s.config.App.ArticleCutoffDate.UTC()
@@ -527,15 +534,16 @@ func (s *SummarizationScheduler) sendDiscordNotification(request SummarizationRe
 		len(webhookURLs), request.ArticleTitle, successCount)
 }
 
-// getArticleDetails retrieves the feed title and publish date for an article URL from the database
-func (s *SummarizationScheduler) getArticleDetails(articleURL string) (string, time.Time) {
+// getArticleDetails retrieves the raw feed URL, a display feed title, and the
+// publish date for an article URL from the database.
+func (s *SummarizationScheduler) getArticleDetails(articleURL string) (string, string, time.Time) {
 	var feedURL string
 	var publishDate time.Time
 	query := `SELECT feed_url, publish_date FROM articles WHERE url = $1 LIMIT 1`
 
 	if err := s.db.QueryRow(query, articleURL).Scan(&feedURL, &publishDate); err != nil {
 		log.Printf("Failed to get article details for %s: %v", articleURL, err)
-		return "Unknown Feed", time.Now()
+		return "", "Unknown Feed", time.Now()
 	}
 
 	// Extract domain name from feed URL as a simple feed title
@@ -547,7 +555,7 @@ func (s *SummarizationScheduler) getArticleDetails(articleURL string) (string, t
 		feedTitle = feedTitle[:idx]
 	}
 
-	return feedTitle, publishDate
+	return feedURL, feedTitle, publishDate
 }
 
 // GetQueueDepth returns the current queue depth (thread-safe)
