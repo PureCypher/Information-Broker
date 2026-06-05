@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"information-broker/config"
 	"log"
@@ -237,7 +238,7 @@ func (s *APIServer) getArticleByID(w http.ResponseWriter, r *http.Request) {
 		&article.FeedURL,
 		&article.ContentHash,
 	)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		http.Error(w, "Not found", http.StatusNotFound)
 		return
 	}
