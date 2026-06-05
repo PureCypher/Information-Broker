@@ -33,7 +33,7 @@ https://www.grahamcluley.com/feed/
 https://www.databreachtoday.com/rss-feeds
 https://www.theregister.com/security/headlines.atom
 https://www.securitynewspaper.com/feed/
-https://www.sophos.com/en-us/resources/feed
+https://www.sophos.com/en-us/blog/feed
 https://www.nist.gov/blogs/cybersecurity-insights/rss.xml
 https://www.proofpoint.com/us/rss.xml
 https://socprime.com/feed/
@@ -49,6 +49,7 @@ https://www.cert.ssi.gouv.fr/feed/
 https://www.cisa.gov/cybersecurity-advisories/all.xml
 https://www.cisa.gov/cybersecurity-advisories/ics-advisories.xml
 https://www.cisa.gov/cybersecurity-advisories/ics-medical-advisories.xml
+https://www.cisecurity.org/feed/blog
 https://www.jpcert.or.jp/english/rss/jpcert-en.rdf
 https://blogs.jpcert.or.jp/en/atom.xml
 https://www.ncsc.gov.uk/api/1/services/v1/all-rss-feed.xml

@@ -71,7 +71,7 @@ services:
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
       DISCORD_WEBHOOK_URLS: ${DISCORD_WEBHOOK_URLS:-}
       # Comma-separated feed-URL substrings to suppress from Discord (still stored/summarized).
-      DISCORD_EXCLUDED_FEEDS: ${DISCORD_EXCLUDED_FEEDS:-cvefeed.io}
+      DISCORD_EXCLUDED_FEEDS: ${DISCORD_EXCLUDED_FEEDS:-cvefeed.io,exploit-db.com}
       DISCORD_MAX_RETRIES: ${DISCORD_MAX_RETRIES:-2}
       DISCORD_TIMEOUT: ${DISCORD_TIMEOUT:-30s}
       
