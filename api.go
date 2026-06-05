@@ -97,6 +97,10 @@ type ArticleView struct {
 // buildArticlesQuery constructs the SQL and ordered args for listing articles,
 // applying optional feed and case-insensitive search (q) filters.
 func buildArticlesQuery(feed, q string, limit, offset int) (string, []interface{}) {
+	q = strings.TrimSpace(q)
+	if len(q) < 2 {
+		q = "" // ignore empty/too-short searches to avoid full-table ILIKE scans
+	}
 	query := `SELECT id, title, url, summary, full_content, publish_date, fetch_duration_ms, feed_url, content_hash
 		FROM articles`
 	var conds []string

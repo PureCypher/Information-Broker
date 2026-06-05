@@ -50,8 +50,32 @@ func TestBuildArticlesQuery(t *testing.T) {
 		if len(args) != 6 {
 			t.Fatalf("expected 6 args, got %d: %v", len(args), args)
 		}
+		if args[0] != "https://example.com/rss" {
+			t.Fatalf("expected feed arg first, got %v", args[0])
+		}
+		if args[1] != "%cve%" {
+			t.Fatalf("expected wrapped like arg second, got %v", args[1])
+		}
 		if args[len(args)-2] != 10 || args[len(args)-1] != 20 {
 			t.Fatalf("limit/offset should be last: %v", args)
+		}
+	})
+
+	t.Run("short query ignored", func(t *testing.T) {
+		q, args := buildArticlesQuery("", "a", 50, 0)
+		if strings.Contains(q, "ILIKE") {
+			t.Fatalf("expected no ILIKE search for short query, got: %s", q)
+		}
+		if len(args) != 2 { // just limit, offset
+			t.Fatalf("expected 2 args, got %d: %v", len(args), args)
+		}
+
+		q, args = buildArticlesQuery("", "   ", 50, 0)
+		if strings.Contains(q, "ILIKE") {
+			t.Fatalf("expected no ILIKE search for whitespace query, got: %s", q)
+		}
+		if len(args) != 2 { // just limit, offset
+			t.Fatalf("expected 2 args, got %d: %v", len(args), args)
 		}
 	})
 }
