@@ -237,6 +237,11 @@ func createTables(db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_articles_feed_url ON articles(feed_url)`,
 		`CREATE INDEX IF NOT EXISTS idx_articles_created_at ON articles(created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_articles_updated_at ON articles(updated_at DESC)`,
+		// Trigram indexes back the /articles?q= ILIKE search (title/summary/full_content).
+		`CREATE EXTENSION IF NOT EXISTS pg_trgm`,
+		`CREATE INDEX IF NOT EXISTS idx_articles_title_trgm ON articles USING GIN (title gin_trgm_ops)`,
+		`CREATE INDEX IF NOT EXISTS idx_articles_summary_trgm ON articles USING GIN (summary gin_trgm_ops)`,
+		`CREATE INDEX IF NOT EXISTS idx_articles_full_content_trgm ON articles USING GIN (full_content gin_trgm_ops)`,
 		`CREATE TABLE IF NOT EXISTS fetch_logs (
 			id SERIAL PRIMARY KEY,
 			feed_url TEXT NOT NULL,
