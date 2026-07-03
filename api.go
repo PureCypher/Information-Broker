@@ -97,8 +97,8 @@ type ArticleView struct {
 }
 
 // buildArticlesQuery constructs the SQL and ordered args for listing articles,
-// applying optional feed and case-insensitive search (q) filters.
-func buildArticlesQuery(feed, q string, limit, offset int) (string, []interface{}) {
+// applying optional feed and case-insensitive search (q) filters, with optional sort order.
+func buildArticlesQuery(feed, q, sort string, limit, offset int) (string, []interface{}) {
 	q = strings.TrimSpace(q)
 	if len(q) < 2 {
 		q = "" // ignore empty/too-short searches to avoid full-table ILIKE scans
@@ -122,7 +122,11 @@ func buildArticlesQuery(feed, q string, limit, offset int) (string, []interface{
 	if len(conds) > 0 {
 		query += " WHERE " + strings.Join(conds, " AND ")
 	}
-	query += fmt.Sprintf(" ORDER BY publish_date DESC LIMIT $%d OFFSET $%d", i, i+1)
+	order := "DESC"
+	if sort == "oldest" {
+		order = "ASC"
+	}
+	query += fmt.Sprintf(" ORDER BY publish_date %s LIMIT $%d OFFSET $%d", order, i, i+1)
 	args = append(args, limit, offset)
 	return query, args
 }
@@ -153,7 +157,7 @@ func (s *APIServer) getArticles(w http.ResponseWriter, r *http.Request) {
 	feedURL := r.URL.Query().Get("feed")
 	searchQ := r.URL.Query().Get("q")
 
-	query, args := buildArticlesQuery(feedURL, searchQ, limit, offset)
+	query, args := buildArticlesQuery(feedURL, searchQ, r.URL.Query().Get("sort"), limit, offset)
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {

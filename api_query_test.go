@@ -7,7 +7,7 @@ import (
 
 func TestBuildArticlesQuery(t *testing.T) {
 	t.Run("no filters", func(t *testing.T) {
-		q, args := buildArticlesQuery("", "", 50, 0)
+		q, args := buildArticlesQuery("", "", "", 50, 0)
 		if strings.Contains(q, "WHERE") {
 			t.Fatalf("expected no WHERE clause, got: %s", q)
 		}
@@ -20,7 +20,7 @@ func TestBuildArticlesQuery(t *testing.T) {
 	})
 
 	t.Run("feed only", func(t *testing.T) {
-		q, args := buildArticlesQuery("https://example.com/rss", "", 50, 0)
+		q, args := buildArticlesQuery("https://example.com/rss", "", "", 50, 0)
 		if !strings.Contains(q, "feed_url = $1") {
 			t.Fatalf("missing feed filter: %s", q)
 		}
@@ -30,7 +30,7 @@ func TestBuildArticlesQuery(t *testing.T) {
 	})
 
 	t.Run("query only", func(t *testing.T) {
-		q, args := buildArticlesQuery("", "ransomware", 50, 0)
+		q, args := buildArticlesQuery("", "ransomware", "", 50, 0)
 		if !strings.Contains(q, "ILIKE") {
 			t.Fatalf("missing ILIKE search: %s", q)
 		}
@@ -43,7 +43,7 @@ func TestBuildArticlesQuery(t *testing.T) {
 	})
 
 	t.Run("feed and query", func(t *testing.T) {
-		q, args := buildArticlesQuery("https://example.com/rss", "cve", 10, 20)
+		q, args := buildArticlesQuery("https://example.com/rss", "cve", "", 10, 20)
 		if !strings.Contains(q, "feed_url = $1") || !strings.Contains(q, "ILIKE $2") {
 			t.Fatalf("expected both filters with correct placeholders: %s", q)
 		}
@@ -62,7 +62,7 @@ func TestBuildArticlesQuery(t *testing.T) {
 	})
 
 	t.Run("short query ignored", func(t *testing.T) {
-		q, args := buildArticlesQuery("", "a", 50, 0)
+		q, args := buildArticlesQuery("", "a", "", 50, 0)
 		if strings.Contains(q, "ILIKE") {
 			t.Fatalf("expected no ILIKE search for short query, got: %s", q)
 		}
@@ -70,12 +70,29 @@ func TestBuildArticlesQuery(t *testing.T) {
 			t.Fatalf("expected 2 args, got %d: %v", len(args), args)
 		}
 
-		q, args = buildArticlesQuery("", "   ", 50, 0)
+		q, args = buildArticlesQuery("", "   ", "", 50, 0)
 		if strings.Contains(q, "ILIKE") {
 			t.Fatalf("expected no ILIKE search for whitespace query, got: %s", q)
 		}
 		if len(args) != 2 { // just limit, offset
 			t.Fatalf("expected 2 args, got %d: %v", len(args), args)
+		}
+	})
+
+	t.Run("sort oldest", func(t *testing.T) {
+		q, _ := buildArticlesQuery("", "", "oldest", 50, 0)
+		if !strings.Contains(q, "ORDER BY publish_date ASC") {
+			t.Fatalf("expected ASC order: %s", q)
+		}
+	})
+
+	t.Run("unknown sort falls back to newest", func(t *testing.T) {
+		q, _ := buildArticlesQuery("", "", "garbage'; DROP TABLE articles;--", 50, 0)
+		if !strings.Contains(q, "ORDER BY publish_date DESC") {
+			t.Fatalf("expected DESC fallback: %s", q)
+		}
+		if strings.Contains(q, "DROP TABLE") {
+			t.Fatalf("sort value leaked into SQL: %s", q)
 		}
 	})
 }
