@@ -17,11 +17,17 @@ CREATE TABLE IF NOT EXISTS articles (
     posted_to_discord BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    
+
     -- Additional fields for RSS monitoring compatibility
     feed_url TEXT,
     content_hash TEXT UNIQUE,
-    fetch_duration_ms INTEGER
+    fetch_duration_ms INTEGER,
+
+    -- Story-clustering columns: title_embedding backs the precomputed clustering job's
+    -- similarity comparisons (no pgvector -- plain Postgres array, compared in Go);
+    -- story_cluster_id is self-referencing (a cluster's seed article's own id).
+    title_embedding real[],
+    story_cluster_id BIGINT
 );
 
 -- Webhook logs table for tracking Discord webhook attempts
@@ -51,6 +57,9 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE INDEX IF NOT EXISTS idx_articles_title_trgm ON articles USING GIN (title gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_articles_summary_trgm ON articles USING GIN (summary gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_articles_full_content_trgm ON articles USING GIN (full_content gin_trgm_ops);
+
+-- Story-clustering index
+CREATE INDEX IF NOT EXISTS idx_articles_story_cluster_id ON articles(story_cluster_id);
 
 -- Performance indexes for webhook_logs table
 CREATE INDEX IF NOT EXISTS idx_webhook_logs_article_id ON webhook_logs(article_id);

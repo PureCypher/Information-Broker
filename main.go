@@ -242,6 +242,12 @@ func createTables(db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_articles_title_trgm ON articles USING GIN (title gin_trgm_ops)`,
 		`CREATE INDEX IF NOT EXISTS idx_articles_summary_trgm ON articles USING GIN (summary gin_trgm_ops)`,
 		`CREATE INDEX IF NOT EXISTS idx_articles_full_content_trgm ON articles USING GIN (full_content gin_trgm_ops)`,
+		// Story-clustering columns: title_embedding backs the precomputed clustering job's
+		// similarity comparisons (no pgvector -- plain Postgres array, compared in Go);
+		// story_cluster_id is self-referencing (a cluster's seed article's own id).
+		`ALTER TABLE articles ADD COLUMN IF NOT EXISTS title_embedding real[]`,
+		`ALTER TABLE articles ADD COLUMN IF NOT EXISTS story_cluster_id BIGINT`,
+		`CREATE INDEX IF NOT EXISTS idx_articles_story_cluster_id ON articles(story_cluster_id)`,
 		`CREATE TABLE IF NOT EXISTS fetch_logs (
 			id SERIAL PRIMARY KEY,
 			feed_url TEXT NOT NULL,
