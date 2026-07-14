@@ -23,10 +23,10 @@ CREATE TABLE IF NOT EXISTS articles (
     content_hash TEXT UNIQUE,
     fetch_duration_ms INTEGER,
 
-    -- Story-clustering columns: title_embedding backs the precomputed clustering job's
+    -- Story-clustering columns: summary_embedding backs the precomputed clustering job's
     -- similarity comparisons (no pgvector -- plain Postgres array, compared in Go);
     -- story_cluster_id is self-referencing (a cluster's seed article's own id).
-    title_embedding real[],
+    summary_embedding real[],
     story_cluster_id BIGINT
 );
 

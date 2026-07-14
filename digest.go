@@ -30,7 +30,7 @@ const minCrossFeedCountForImportant = 2
 // buildDigestQuery returns the SQL and args for the cross-feed importance
 // heuristic: for every article published since `since`, count how many
 // *other* feeds have an article in the same precomputed story cluster
-// (story_cluster_id, assigned by ClusteringScheduler via title embedding
+// (story_cluster_id, assigned by ClusteringScheduler via summary embedding
 // similarity) in the same window. This replaces two earlier live-computed
 // approaches: a pg_trgm self-join (timed out past ~2k rows -- trigram GIN
 // indexes don't accelerate column-to-column joins) and a GROUP BY on

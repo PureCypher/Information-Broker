@@ -12,10 +12,17 @@ import (
 	"github.com/lib/pq"
 )
 
-// ClusteringScheduler periodically embeds recent article titles and assigns
-// them to story clusters, backing the digest feature's cross-feed
+// ClusteringScheduler periodically embeds recent article summaries and
+// assigns them to story clusters, backing the digest feature's cross-feed
 // "important" bucket. It never runs concurrently with active summarization
 // -- see isIdle -- so it doesn't compete for Ollama capacity.
+//
+// Embeds the Ollama-generated summary, not the raw title: a live threshold
+// spot-check found title-only embeddings unreliable on this corpus (CVE
+// advisory titles share so much boilerplate -- "... Elevation of Privilege
+// Vulnerability" -- that different vulnerabilities scored MORE similar,
+// 0.85+, than genuine cross-outlet duplicates of the same story, 0.67-0.74).
+// Summaries are prose describing the actual content, not a formulaic header.
 type ClusteringScheduler struct {
 	db         *sql.DB
 	config     *config.Config
@@ -80,27 +87,34 @@ func (c *ClusteringScheduler) runCycle(ctx context.Context) {
 	}
 }
 
-// embedBatch embeds up to BatchSize titles in the clustering window that
-// don't have an embedding yet.
+// embedBatch embeds up to BatchSize summaries in the clustering window that
+// have a real summary but no embedding yet. Articles without a summary yet
+// (summarization is async, queued separately) are skipped -- not embedded
+// via a title fallback -- and picked up automatically once summarized, on
+// a later cycle. Articles whose summarization genuinely failed (stored as
+// the literal fallback string "summary unavailable") are excluded too,
+// since embedding that identical string would falsely cluster every
+// failed-summary article together regardless of actual topic.
 func (c *ClusteringScheduler) embedBatch(ctx context.Context) error {
 	since := time.Now().Add(-time.Duration(c.config.Clustering.WindowDays) * 24 * time.Hour)
 
 	rows, err := c.db.QueryContext(ctx, `
-		SELECT id, title FROM articles
-		WHERE publish_date >= $1 AND title_embedding IS NULL
+		SELECT id, summary FROM articles
+		WHERE publish_date >= $1 AND summary_embedding IS NULL
+		  AND summary IS NOT NULL AND summary <> 'summary unavailable'
 		ORDER BY publish_date DESC LIMIT $2`,
 		since, c.config.Clustering.BatchSize)
 	if err != nil {
 		return err
 	}
-	type idTitle struct {
-		id    int64
-		title string
+	type idSummary struct {
+		id      int64
+		summary string
 	}
-	var toEmbed []idTitle
+	var toEmbed []idSummary
 	for rows.Next() {
-		var it idTitle
-		if err := rows.Scan(&it.id, &it.title); err != nil {
+		var it idSummary
+		if err := rows.Scan(&it.id, &it.summary); err != nil {
 			log.Printf("Story-clustering: embed batch scan error: %v", err)
 			continue
 		}
@@ -112,13 +126,13 @@ func (c *ClusteringScheduler) embedBatch(ctx context.Context) error {
 	}
 
 	for _, it := range toEmbed {
-		emb, err := fetchEmbedding(ctx, c.httpClient, c.config.OLLAMA.URL, c.config.Clustering.EmbedModel, it.title)
+		emb, err := fetchEmbedding(ctx, c.httpClient, c.config.OLLAMA.URL, c.config.Clustering.EmbedModel, it.summary)
 		if err != nil {
 			log.Printf("Story-clustering: embedding failed for article %d: %v", it.id, err)
 			continue
 		}
 		if _, err := c.db.ExecContext(ctx,
-			`UPDATE articles SET title_embedding = $1 WHERE id = $2`,
+			`UPDATE articles SET summary_embedding = $1 WHERE id = $2`,
 			pq.Array(emb), it.id,
 		); err != nil {
 			log.Printf("Story-clustering: failed to store embedding for article %d: %v", it.id, err)
@@ -133,7 +147,7 @@ func (c *ClusteringScheduler) clusterBatch(ctx context.Context) error {
 	since := time.Now().Add(-time.Duration(c.config.Clustering.WindowDays) * 24 * time.Hour)
 
 	seedRows, err := c.db.QueryContext(ctx, `
-		SELECT id, title_embedding FROM articles
+		SELECT id, summary_embedding FROM articles
 		WHERE publish_date >= $1 AND story_cluster_id = id`,
 		since)
 	if err != nil {
@@ -155,8 +169,8 @@ func (c *ClusteringScheduler) clusterBatch(ctx context.Context) error {
 	}
 
 	unclusteredRows, err := c.db.QueryContext(ctx, `
-		SELECT id, title_embedding FROM articles
-		WHERE publish_date >= $1 AND story_cluster_id IS NULL AND title_embedding IS NOT NULL`,
+		SELECT id, summary_embedding FROM articles
+		WHERE publish_date >= $1 AND story_cluster_id IS NULL AND summary_embedding IS NOT NULL`,
 		since)
 	if err != nil {
 		return err
