@@ -59,6 +59,7 @@ func (s *APIServer) Start() {
 	mux.HandleFunc("/articles", corsHandler(s.metrics.HTTPMetricsMiddleware(s.getArticles, "/articles")))
 	mux.HandleFunc("/articles/latest", corsHandler(s.metrics.HTTPMetricsMiddleware(s.getLatestArticles, "/articles/latest")))
 	mux.HandleFunc("/articles/get", corsHandler(s.metrics.HTTPMetricsMiddleware(s.getArticleByID, "/articles/get")))
+	mux.HandleFunc("/articles/digest", corsHandler(s.metrics.HTTPMetricsMiddleware(s.getArticlesDigest, "/articles/digest")))
 	mux.HandleFunc("/feeds", corsHandler(s.metrics.HTTPMetricsMiddleware(s.getFeeds, "/feeds")))
 	mux.HandleFunc("/stats", corsHandler(s.metrics.HTTPMetricsMiddleware(s.getStats, "/stats")))
 	mux.HandleFunc("/summarization/stats", corsHandler(s.metrics.HTTPMetricsMiddleware(s.getSummarizationStats, "/summarization/stats")))

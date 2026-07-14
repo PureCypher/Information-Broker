@@ -1,6 +1,11 @@
 package main
 
-import "time"
+import (
+	"encoding/json"
+	"log"
+	"net/http"
+	"time"
+)
 
 // digestWindowOrDefault maps a digest range parameter to a lookback window.
 // Unknown or empty values fall back to the daily (24h) window — same
@@ -55,4 +60,60 @@ func splitImportant(rows []ArticleView) (important, other []ArticleView) {
 		}
 	}
 	return important, other
+}
+
+// DigestResult is the response envelope for GET /articles/digest.
+type DigestResult struct {
+	Range     string        `json:"range"`
+	Since     time.Time     `json:"since"`
+	Important []ArticleView `json:"important"`
+	Other     []ArticleView `json:"other"`
+}
+
+var validDigestRanges = map[string]bool{"daily": true, "weekly": true, "monthly": true}
+
+// getArticlesDigest returns articles bucketed into "important" (multi-feed
+// coverage) and "other" for the requested daily/weekly/monthly window.
+func (s *APIServer) getArticlesDigest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	rangeParam := r.URL.Query().Get("range")
+	if !validDigestRanges[rangeParam] {
+		rangeParam = "daily"
+	}
+	since := time.Now().Add(-digestWindowOrDefault(rangeParam))
+
+	query, args := buildDigestQuery(since)
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		log.Printf("Database query error: %v", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	all := []ArticleView{}
+	for rows.Next() {
+		var a ArticleView
+		var fetchDurationMs int64
+		err := rows.Scan(
+			&a.ID, &a.Title, &a.URL, &a.Summary, &a.Content, &a.PublishedAt,
+			&fetchDurationMs, &a.FeedURL, &a.ContentHash, &a.CrossFeedCount,
+		)
+		if err != nil {
+			log.Printf("Row scan error: %v", err)
+			continue
+		}
+		a.FetchDuration = time.Duration(fetchDurationMs) * time.Millisecond
+		all = append(all, a)
+	}
+
+	important, other := splitImportant(all)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(DigestResult{
+		Range: rangeParam, Since: since, Important: important, Other: other,
+	})
 }
