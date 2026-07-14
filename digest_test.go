@@ -28,20 +28,23 @@ func TestBuildDigestQuery(t *testing.T) {
 	since := time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC)
 	q, args := buildDigestQuery(since)
 
-	if !strings.Contains(q, "a2.feed_url <> a1.feed_url") {
-		t.Fatalf("missing cross-feed condition: %s", q)
+	if strings.Contains(q, "a1.title % a2.title") || strings.Contains(q, "JOIN articles a2") {
+		t.Fatalf("query must not use the pg_trgm self-join (O(n^2), times out past ~2k rows): %s", q)
 	}
-	if !strings.Contains(q, "a1.title % a2.title") {
-		t.Fatalf("missing trigram similarity condition: %s", q)
+	if !strings.Contains(q, "lower(btrim(title))") {
+		t.Fatalf("missing normalized-title grouping: %s", q)
 	}
-	if !strings.Contains(q, "GROUP BY a1.id") {
-		t.Fatalf("missing GROUP BY: %s", q)
+	if !strings.Contains(q, "GROUP BY lower(btrim(title))") {
+		t.Fatalf("missing GROUP BY on normalized title: %s", q)
 	}
-	if !strings.Contains(q, "ORDER BY cross_feed_count DESC, a1.publish_date DESC") {
+	if !strings.Contains(q, "COUNT(DISTINCT feed_url)") {
+		t.Fatalf("missing distinct-feed count: %s", q)
+	}
+	if !strings.Contains(q, "ORDER BY cross_feed_count DESC, a.publish_date DESC") {
 		t.Fatalf("missing ORDER BY: %s", q)
 	}
 	if len(args) != 1 || args[0] != since {
-		t.Fatalf("expected single since arg, got %v", args)
+		t.Fatalf("expected single since arg (bound twice via $1), got %v", args)
 	}
 }
 

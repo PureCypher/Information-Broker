@@ -28,24 +28,34 @@ const minCrossFeedCountForImportant = 2
 
 // buildDigestQuery returns the SQL and args for the cross-feed importance
 // heuristic: for every article published since `since`, count how many
-// *other* feeds (feed_url <> a1.feed_url) ran a similarly-titled story
-// (pg_trgm's `%` operator, backed by the existing idx_articles_title_trgm
-// GIN index) in the same window.
+// *other* feeds ran an article with the same normalized title in the same
+// window, via a GROUP BY on lower(btrim(title)) — not a pg_trgm similarity
+// self-join. An earlier version joined articles to themselves on
+// `title % title`; the trgm GIN index only accelerates `title % 'literal'`,
+// not column-to-column comparisons, so that self-join fell back to a full
+// nested loop and timed out in production past ~2k rows (the weekly
+// window). GROUP BY is O(n) and needs no index at this scale.
 //
-// ponytail: title trigram similarity catches near-duplicate/syndicated
-// headlines, not editorially-rewritten cross-outlet coverage of the same
-// event — treat cross_feed_count as a duplication signal, not a true
-// importance score. Upgrade path: embedding similarity or the existing
-// Ollama summarizer, if this proves too weak in practice.
+// ponytail: exact (post-normalization) title matching catches only
+// byte-identical wire-service/syndicated headlines, not near-duplicates or
+// editorially-rewritten cross-outlet coverage of the same event — treat
+// cross_feed_count as a duplication signal, not a true importance score.
+// Upgrade path: an index on lower(btrim(title)) if this table grows enough
+// for the GROUP BY to need one, or embedding similarity / the existing
+// Ollama summarizer for real near-duplicate matching.
 func buildDigestQuery(since time.Time) (string, []interface{}) {
-	query := `SELECT a1.id, a1.title, a1.url, a1.summary, a1.full_content, a1.publish_date,
-		a1.fetch_duration_ms, a1.feed_url, a1.content_hash, COUNT(DISTINCT a2.feed_url) AS cross_feed_count
-		FROM articles a1
-		LEFT JOIN articles a2
-		  ON a2.publish_date >= $1 AND a2.feed_url <> a1.feed_url AND a1.title % a2.title
-		WHERE a1.publish_date >= $1
-		GROUP BY a1.id
-		ORDER BY cross_feed_count DESC, a1.publish_date DESC`
+	query := `SELECT a.id, a.title, a.url, a.summary, a.full_content, a.publish_date,
+		a.fetch_duration_ms, a.feed_url, a.content_hash,
+		(feed_counts.distinct_feeds - 1) AS cross_feed_count
+		FROM articles a
+		JOIN (
+			SELECT lower(btrim(title)) AS norm_title, COUNT(DISTINCT feed_url) AS distinct_feeds
+			FROM articles
+			WHERE publish_date >= $1
+			GROUP BY lower(btrim(title))
+		) feed_counts ON feed_counts.norm_title = lower(btrim(a.title))
+		WHERE a.publish_date >= $1
+		ORDER BY cross_feed_count DESC, a.publish_date DESC`
 	return query, []interface{}{since}
 }
 
