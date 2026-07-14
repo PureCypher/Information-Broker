@@ -15,3 +15,31 @@ func digestWindowOrDefault(rangeParam string) time.Duration {
 		return 24 * time.Hour
 	}
 }
+
+// minCrossFeedCountForImportant is the cross-feed coverage threshold for the
+// "important" bucket of a digest: a story counts as important once at least
+// this many *other* feeds ran something with a similar title in the window.
+const minCrossFeedCountForImportant = 2
+
+// buildDigestQuery returns the SQL and args for the cross-feed importance
+// heuristic: for every article published since `since`, count how many
+// *other* feeds (feed_url <> a1.feed_url) ran a similarly-titled story
+// (pg_trgm's `%` operator, backed by the existing idx_articles_title_trgm
+// GIN index) in the same window.
+//
+// ponytail: title trigram similarity catches near-duplicate/syndicated
+// headlines, not editorially-rewritten cross-outlet coverage of the same
+// event — treat cross_feed_count as a duplication signal, not a true
+// importance score. Upgrade path: embedding similarity or the existing
+// Ollama summarizer, if this proves too weak in practice.
+func buildDigestQuery(since time.Time) (string, []interface{}) {
+	query := `SELECT a1.id, a1.title, a1.url, a1.summary, a1.full_content, a1.publish_date,
+		a1.fetch_duration_ms, a1.feed_url, a1.content_hash, COUNT(DISTINCT a2.feed_url) AS cross_feed_count
+		FROM articles a1
+		LEFT JOIN articles a2
+		  ON a2.publish_date >= $1 AND a2.feed_url <> a1.feed_url AND a1.title % a2.title
+		WHERE a1.publish_date >= $1
+		GROUP BY a1.id
+		ORDER BY cross_feed_count DESC, a1.publish_date DESC`
+	return query, []interface{}{since}
+}
