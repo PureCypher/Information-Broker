@@ -90,6 +90,33 @@ func TestExtractMainContentStripsAudioPlayerWidget(t *testing.T) {
 	}
 }
 
+func TestExtractMainContentStripsScriptAndStyleTags(t *testing.T) {
+	// goquery's .Text() includes the raw source text of <script>/<style>
+	// elements (browsers don't render them, but they're still DOM text
+	// nodes) — found live via the ar-widget plugin's inline <style> block
+	// leaking raw CSS rules into the stored article content.
+	html := `<html><body>
+		<div class="entry-content">
+			<style>#ar-widget{margin:0 0 2rem;font-family:sans-serif;}</style>
+			<script>console.log("tracking pixel fired");</script>
+			<p>` + strings.Repeat("The real article prose that actually matters here. ", 20) + `</p>
+		</div>
+	</body></html>`
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	got := extractMainContent(doc)
+	if strings.Contains(got, "margin:0") || strings.Contains(got, "console.log") {
+		t.Fatalf("script/style raw text leaked into extracted content: %s", got)
+	}
+	if !strings.Contains(got, "real article prose") {
+		t.Fatalf("expected the real article prose to remain, got: %s", got)
+	}
+}
+
 func TestExtractMainContentFallsBackToBody(t *testing.T) {
 	html := `<html><body>Just some plain body text, no article/content wrapper.</body></html>`
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))

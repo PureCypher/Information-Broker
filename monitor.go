@@ -564,6 +564,11 @@ func (m *RSSMonitor) processArticle(item *gofeed.Item, feedURL string) bool {
 // that tier matched does it fall back to the broader "main" landmark, then
 // finally the whole "body".
 func extractMainContent(doc *goquery.Document) string {
+	// goquery's .Text() returns the raw source text of <script>/<style>
+	// elements too (they're unrendered but still DOM text nodes) — strip
+	// them first so CSS rules or JS don't leak into the stored article text.
+	doc.Find("script, style").Remove()
+
 	// Strip known non-article widgets before measuring/using any selector's
 	// text — e.g. "#ar-widget" is a common "Listen to this article"
 	// audio-player plugin embedded inside the real content container, whose
