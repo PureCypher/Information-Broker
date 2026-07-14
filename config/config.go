@@ -20,6 +20,7 @@ type Config struct {
 	Performance   PerformanceConfig
 	Content       ContentConfig
 	Summarization SummarizationConfig
+	Clustering    ClusteringConfig
 	FlareSolverr  FlareSolverrConfig
 }
 
@@ -110,6 +111,15 @@ type SummarizationConfig struct {
 	QueuePurgeTimeout time.Duration
 }
 
+// ClusteringConfig holds configuration for the precomputed story-clustering scheduler.
+type ClusteringConfig struct {
+	Interval            time.Duration
+	WindowDays          int
+	BatchSize           int
+	SimilarityThreshold float64
+	EmbedModel          string
+}
+
 // Load loads configuration from environment variables
 func Load() *Config {
 	return &Config{
@@ -176,6 +186,13 @@ func Load() *Config {
 			MetricsInterval:   getEnvDuration("SUMMARIZATION_METRICS_INTERVAL", 10*time.Second),
 			QueuePurgeTimeout: getEnvDuration("SUMMARIZATION_QUEUE_PURGE_TIMEOUT", 1*time.Hour),
 		},
+		Clustering: ClusteringConfig{
+			Interval:            getEnvDuration("CLUSTERING_INTERVAL", 15*time.Minute),
+			WindowDays:          getEnvInt("CLUSTERING_WINDOW_DAYS", 35),
+			BatchSize:           getEnvInt("CLUSTERING_BATCH_SIZE", 200),
+			SimilarityThreshold: getEnvFloat("CLUSTERING_SIMILARITY_THRESHOLD", 0.85),
+			EmbedModel:          getEnv("CLUSTERING_EMBED_MODEL", "nomic-embed-text"),
+		},
 	}
 }
 
@@ -191,6 +208,15 @@ func getEnvInt(key string, defaultValue int) int {
 	if value := os.Getenv(key); value != "" {
 		if intValue, err := strconv.Atoi(value); err == nil {
 			return intValue
+		}
+	}
+	return defaultValue
+}
+
+func getEnvFloat(key string, defaultValue float64) float64 {
+	if value := os.Getenv(key); value != "" {
+		if floatValue, err := strconv.ParseFloat(value, 64); err == nil {
+			return floatValue
 		}
 	}
 	return defaultValue
