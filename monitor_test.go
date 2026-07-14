@@ -117,6 +117,40 @@ func TestExtractMainContentStripsScriptAndStyleTags(t *testing.T) {
 	}
 }
 
+func TestExtractMainContentFindsPageContentWrapper(t *testing.T) {
+	// Real-world case found live: cvefeed.io (a Bootstrap admin-dashboard
+	// theme, 6258 articles -- the largest single feed in the corpus) has no
+	// <main> tag and no <article>/.entry-content/.post-content wrapper. Its
+	// real per-CVE description lives in a .page-content div; the header/nav
+	// (a search button placeholder "CVE ID, Product, Vendor ...", a
+	// "Pricing" nav link) comes first in DOM order, outside that wrapper.
+	// Falling through to <body> pulled in that header/nav chrome ahead of
+	// the real content, and Ollama's summary ended up describing the site's
+	// generic search feature instead of the specific CVE.
+	html := `<html><body>
+		<header>
+			<button>CVE ID, Product, Vendor ...</button>
+			<a href="/pricing">Pricing</a>
+		</header>
+		<div class="page-content">
+			<p>` + strings.Repeat("CVE-2026-47303 is an elevation of privilege vulnerability in ASP.NET Core. ", 10) + `</p>
+		</div>
+	</body></html>`
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	got := extractMainContent(doc)
+	if strings.Contains(got, "CVE ID, Product, Vendor") || strings.Contains(got, "Pricing") {
+		t.Fatalf("header/nav chrome leaked into extracted content: %s", got)
+	}
+	if !strings.Contains(got, "elevation of privilege vulnerability in ASP.NET Core") {
+		t.Fatalf("expected the .page-content text, got: %s", got)
+	}
+}
+
 func TestExtractMainContentFallsBackToBody(t *testing.T) {
 	html := `<html><body>Just some plain body text, no article/content wrapper.</body></html>`
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))

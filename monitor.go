@@ -562,7 +562,12 @@ func (m *RSSMonitor) processArticle(item *gofeed.Item, feedURL string) bool {
 // and keeps the single longest, since a real article body is virtually
 // always far longer than a related-post teaser card; only if nothing in
 // that tier matched does it fall back to the broader "main" landmark, then
-// finally the whole "body".
+// finally the whole "body". .page-content/.main-content cover Bootstrap
+// admin-dashboard-style themes (found live on cvefeed.io, the largest single
+// feed in the corpus) that have no <article>/.entry-content wrapper and no
+// <main> tag at all — without a matching selector, the body fallback pulled
+// in header/nav chrome (a search-box placeholder, a "Pricing" nav link)
+// ahead of the real per-page content.
 func extractMainContent(doc *goquery.Document) string {
 	// goquery's .Text() returns the raw source text of <script>/<style>
 	// elements too (they're unrendered but still DOM text nodes) — strip
@@ -583,6 +588,8 @@ func extractMainContent(doc *goquery.Document) string {
 		".content",
 		".article-body",
 		".post-body",
+		".page-content",
+		".main-content",
 	}
 
 	var content string
