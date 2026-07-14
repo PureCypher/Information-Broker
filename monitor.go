@@ -564,6 +564,13 @@ func (m *RSSMonitor) processArticle(item *gofeed.Item, feedURL string) bool {
 // that tier matched does it fall back to the broader "main" landmark, then
 // finally the whole "body".
 func extractMainContent(doc *goquery.Document) string {
+	// Strip known non-article widgets before measuring/using any selector's
+	// text — e.g. "#ar-widget" is a common "Listen to this article"
+	// audio-player plugin embedded inside the real content container, whose
+	// own playback/voice-selector controls would otherwise be measured (and
+	// stored) as if they were article prose.
+	doc.Find("#ar-widget").Remove()
+
 	specificSelectors := []string{
 		"article",
 		".post-content",

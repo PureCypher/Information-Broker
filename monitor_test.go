@@ -62,6 +62,34 @@ func TestExtractMainContentPrefersLongerMatchFromLaterSelector(t *testing.T) {
 	}
 }
 
+func TestExtractMainContentStripsAudioPlayerWidget(t *testing.T) {
+	// Real-world case found live: hackread.com's actual post body is wrapped
+	// in .entry-content, but that same container's FIRST child is a
+	// "Listen to this article" audio-player widget (#ar-widget) whose own
+	// text — playback controls, speed options, a long voice-selector list —
+	// got included as if it were article prose, since .Text() walks all
+	// descendants. The widget must be stripped before measuring/using text.
+	html := `<html><body>
+		<div class="entry-content">
+			<div id="ar-widget">Listen to this article 0:00 Play 10s Speed 0.75x 1x 1.25x Voice Emma James Liam</div>
+			<p>` + strings.Repeat("The real article prose that actually matters here. ", 20) + `</p>
+		</div>
+	</body></html>`
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	got := extractMainContent(doc)
+	if strings.Contains(got, "Listen to this article") || strings.Contains(got, "Voice") {
+		t.Fatalf("audio-player widget text leaked into extracted content: %s", got)
+	}
+	if !strings.Contains(got, "real article prose") {
+		t.Fatalf("expected the real article prose to remain, got: %s", got)
+	}
+}
+
 func TestExtractMainContentFallsBackToBody(t *testing.T) {
 	html := `<html><body>Just some plain body text, no article/content wrapper.</body></html>`
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
