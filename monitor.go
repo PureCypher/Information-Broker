@@ -551,6 +551,46 @@ func (m *RSSMonitor) processArticle(item *gofeed.Item, feedURL string) bool {
 	return true
 }
 
+// extractMainContent picks the best-matching element's text from a page.
+// Pages that include "related posts"/"latest articles" widgets often have
+// several elements matching a content-area selector (e.g. multiple <article>
+// teaser cards) before — or instead of — the actual post body, which may
+// itself match a different, later selector (e.g. a bare .entry-content div
+// with no <article> wrapper at all). Stopping at the first selector with any
+// non-empty match can silently grab an unrelated teaser. Instead, this
+// compares every match across the whole tier of specific content selectors
+// and keeps the single longest, since a real article body is virtually
+// always far longer than a related-post teaser card; only if nothing in
+// that tier matched does it fall back to the broader "main" landmark, then
+// finally the whole "body".
+func extractMainContent(doc *goquery.Document) string {
+	specificSelectors := []string{
+		"article",
+		".post-content",
+		".entry-content",
+		".content",
+		".article-body",
+		".post-body",
+	}
+
+	var content string
+	for _, selector := range specificSelectors {
+		doc.Find(selector).Each(func(_ int, s *goquery.Selection) {
+			if text := s.Text(); len(text) > len(content) {
+				content = text
+			}
+		})
+	}
+
+	if content == "" {
+		content = doc.Find("main").First().Text()
+	}
+	if content == "" {
+		content = doc.Find("body").Text()
+	}
+	return content
+}
+
 // fetchFullContent attempts to fetch the full content of an article
 func (m *RSSMonitor) fetchFullContent(ctx context.Context, url string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -576,32 +616,7 @@ func (m *RSSMonitor) fetchFullContent(ctx context.Context, url string) (string, 
 		return "", err
 	}
 
-	// Try to find main content areas (common selectors)
-	contentSelectors := []string{
-		"article",
-		".post-content",
-		".entry-content",
-		".content",
-		"main",
-		".article-body",
-		".post-body",
-	}
-
-	var content string
-	for _, selector := range contentSelectors {
-		if text := doc.Find(selector).First().Text(); text != "" {
-			content = text
-			break
-		}
-	}
-
-	// Fallback to body text if no specific content area found
-	if content == "" {
-		content = doc.Find("body").Text()
-	}
-
-	// Clean up the content
-	content = strings.TrimSpace(content)
+	content := strings.TrimSpace(extractMainContent(doc))
 	if len(content) > m.config.Performance.MaxArticleContentLength { // Limit content length
 		// Truncate on a rune boundary; byte-slicing can split a multi-byte
 		// character and leave invalid UTF-8 that PostgreSQL rejects on save.
