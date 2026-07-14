@@ -392,6 +392,9 @@ func (s *APIServer) getStats(w http.ResponseWriter, r *http.Request) {
 		SuccessfulFetches int        `json:"successful_fetches_24h"`
 		FailedFetches     int        `json:"failed_fetches_24h"`
 		AvgFetchTime      *float64   `json:"avg_fetch_time_ms"`
+		ArticlesToday     int        `json:"articles_today"`
+		ArticlesThisWeek  int        `json:"articles_this_week"`
+		ArticlesThisMonth int        `json:"articles_this_month"`
 	}
 
 	var stats Stats
@@ -433,11 +436,26 @@ func (s *APIServer) getStats(w http.ResponseWriter, r *http.Request) {
 
 	// Get average fetch time
 	err = s.db.QueryRow(`
-		SELECT AVG(duration_ms) FROM fetch_logs 
+		SELECT AVG(duration_ms) FROM fetch_logs
 		WHERE status = 'success' AND created_at > NOW() - INTERVAL '24 hours'
 	`).Scan(&stats.AvgFetchTime)
 	if err != nil {
 		log.Printf("Error getting average fetch time: %v", err)
+	}
+
+	// Get articles collected today/this week/this month, by fetch_time (when
+	// we ingested it, not the source's own publish_date).
+	err = s.db.QueryRow(`SELECT COUNT(*) FROM articles WHERE fetch_time >= NOW() - INTERVAL '24 hours'`).Scan(&stats.ArticlesToday)
+	if err != nil {
+		log.Printf("Error getting articles today: %v", err)
+	}
+	err = s.db.QueryRow(`SELECT COUNT(*) FROM articles WHERE fetch_time >= NOW() - INTERVAL '7 days'`).Scan(&stats.ArticlesThisWeek)
+	if err != nil {
+		log.Printf("Error getting articles this week: %v", err)
+	}
+	err = s.db.QueryRow(`SELECT COUNT(*) FROM articles WHERE fetch_time >= NOW() - INTERVAL '30 days'`).Scan(&stats.ArticlesThisMonth)
+	if err != nil {
+		log.Printf("Error getting articles this month: %v", err)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
