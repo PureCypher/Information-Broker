@@ -26,54 +26,35 @@ func digestWindowOrDefault(rangeParam string) time.Duration {
 // this many *other* feeds ran something with a similar title in the window.
 const minCrossFeedCountForImportant = 2
 
-// normTitleSQL returns a SQL expression that normalizes a title column for
-// cross-feed grouping: lowercases, strips a trailing "| Site Name" suffix
-// (many outlets append their own name after a pipe), strips common
-// punctuation -- including straight and typographic quotes, so ASCII vs.
-// smart-quote variants of the same title still match -- and collapses
-// whitespace. Uses dollar-quoted string literals ($re$...$re$) for the
-// regex patterns so the embedded quote characters need no SQL escaping.
-func normTitleSQL(column string) string {
-	return `btrim(regexp_replace(regexp_replace(regexp_replace(lower(` + column + `),
-		$re$\s*\|.*$re$, '', 'g'),
-		$re$['"‘’“”.,:;!?()]$re$, '', 'g'),
-		$re$\s+$re$, ' ', 'g'))`
-}
 
 // buildDigestQuery returns the SQL and args for the cross-feed importance
 // heuristic: for every article published since `since`, count how many
-// *other* feeds ran an article with the same normalized title in the same
-// window, via a GROUP BY on normTitleSQL's normalized title -- not a
-// pg_trgm similarity self-join. An earlier version joined articles to
-// themselves on `title % title`; the trgm GIN index only accelerates
-// `title % 'literal'`, not column-to-column comparisons, so that self-join
-// fell back to a full nested loop and timed out in production past ~2k
-// rows (the weekly window). GROUP BY is O(n) and needs no index at this
-// scale. A first pass at the GROUP BY normalized on lower(btrim(title))
-// alone, which was too strict in practice -- outlet-specific title
-// formatting (trailing "| Site Name", differing punctuation/quote styles)
-// kept genuinely-identical stories from matching, so daily/weekly digests
-// rarely populated "important" at all. normTitleSQL strips that noise.
+// *other* feeds have an article in the same precomputed story cluster
+// (story_cluster_id, assigned by ClusteringScheduler via title embedding
+// similarity) in the same window. This replaces two earlier live-computed
+// approaches: a pg_trgm self-join (timed out past ~2k rows -- trigram GIN
+// indexes don't accelerate column-to-column joins) and a GROUP BY on
+// normalized title (fast, but too strict -- outlets reword headlines for
+// the same event, so daily/weekly digests rarely populated "important").
+// Precomputing via embeddings (see clustering_scheduler.go) catches those
+// reworded-but-same-story cases; this query is now a plain indexed GROUP BY.
 //
-// ponytail: still an exact match after normalization, not fuzzy -- two
-// outlets that genuinely reword a headline (not just punctuate or brand it
-// differently) still won't match. Upgrade path: blocked similarity
-// matching (bucket by shared significant words before comparing), or a
-// precomputed clustering job (embeddings or the existing Ollama
-// summarizer), if this proves too narrow.
+// ponytail: story_cluster_id is NULL for articles the clustering job hasn't
+// reached yet (its own ticker interval, gated further by summarization
+// activity) -- they're excluded from cross_feed_count here but still show
+// up in the digest's "everything else" bucket via the outer WHERE clause,
+// and get a cluster on the next cycle.
 func buildDigestQuery(since time.Time) (string, []interface{}) {
-	normOuter := normTitleSQL("a.title")
-	normSub := normTitleSQL("title")
 	query := `SELECT a.id, a.title, a.url, a.summary, a.full_content, a.publish_date,
 		a.fetch_duration_ms, a.feed_url, a.content_hash,
-		(feed_counts.distinct_feeds - 1) AS cross_feed_count
+		(cluster_counts.distinct_feeds - 1) AS cross_feed_count
 		FROM articles a
 		JOIN (
-			SELECT ` + normSub + ` AS norm_title, COUNT(DISTINCT feed_url) AS distinct_feeds
+			SELECT story_cluster_id, COUNT(DISTINCT feed_url) AS distinct_feeds
 			FROM articles
-			WHERE publish_date >= $1
-			GROUP BY ` + normSub + `
-		) feed_counts ON feed_counts.norm_title = ` + normOuter + `
+			WHERE publish_date >= $1 AND story_cluster_id IS NOT NULL
+			GROUP BY story_cluster_id
+		) cluster_counts ON cluster_counts.story_cluster_id = a.story_cluster_id
 		WHERE a.publish_date >= $1
 		ORDER BY cross_feed_count DESC, a.publish_date DESC`
 	return query, []interface{}{since}

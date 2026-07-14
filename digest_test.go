@@ -28,17 +28,14 @@ func TestBuildDigestQuery(t *testing.T) {
 	since := time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC)
 	q, args := buildDigestQuery(since)
 
-	if strings.Contains(q, "a1.title % a2.title") || strings.Contains(q, "JOIN articles a2") {
-		t.Fatalf("query must not use the pg_trgm self-join (O(n^2), times out past ~2k rows): %s", q)
+	if strings.Contains(q, "regexp_replace") || strings.Contains(q, "normTitleSQL") {
+		t.Fatalf("query must not use the old title-normalization GROUP BY: %s", q)
 	}
-	// normTitleSQL is applied three times: subquery SELECT, subquery GROUP
-	// BY, and the outer join's a.title -- each is a 3-call regexp_replace chain.
-	if strings.Count(q, "regexp_replace") != 9 {
-		t.Fatalf("expected normTitleSQL's 3-step regexp_replace chain applied 3x (subquery SELECT, subquery GROUP BY, outer join), got %d: %s",
-			strings.Count(q, "regexp_replace"), q)
+	if !strings.Contains(q, "GROUP BY story_cluster_id") {
+		t.Fatalf("missing GROUP BY on story_cluster_id: %s", q)
 	}
-	if !strings.Contains(q, "GROUP BY") {
-		t.Fatalf("missing GROUP BY on normalized title: %s", q)
+	if !strings.Contains(q, "story_cluster_id IS NOT NULL") {
+		t.Fatalf("subquery must exclude unclustered rows: %s", q)
 	}
 	if !strings.Contains(q, "COUNT(DISTINCT feed_url)") {
 		t.Fatalf("missing distinct-feed count: %s", q)
@@ -48,21 +45,6 @@ func TestBuildDigestQuery(t *testing.T) {
 	}
 	if len(args) != 1 || args[0] != since {
 		t.Fatalf("expected single since arg (bound twice via $1), got %v", args)
-	}
-}
-
-func TestNormTitleSQLPatterns(t *testing.T) {
-	expr := normTitleSQL("title")
-	for _, want := range []string{
-		`\s*\|.*`, // trailing "| Site Name" suffix
-		`.,:;!?()`, // common punctuation, alongside smart quotes elsewhere in the class
-		`\s+`,      // whitespace collapse
-		"lower(title)",
-		"btrim(",
-	} {
-		if !strings.Contains(expr, want) {
-			t.Fatalf("normTitleSQL(%q) missing expected fragment %q: %s", "title", want, expr)
-		}
 	}
 }
 
