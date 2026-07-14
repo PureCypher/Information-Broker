@@ -59,4 +59,26 @@ func TestSplitImportant(t *testing.T) {
 	if len(other) != 2 || other[0].ID != 2 || other[1].ID != 4 {
 		t.Fatalf("other = %+v, want IDs 2,4 in order", other)
 	}
+
+	// Verify both buckets are non-nil empty slices when input is empty
+	importantEmpty, otherEmpty := splitImportant([]ArticleView{})
+	if importantEmpty == nil {
+		t.Error("important should be non-nil empty slice, got nil")
+	}
+	if otherEmpty == nil {
+		t.Error("other should be non-nil empty slice, got nil")
+	}
+
+	// Verify both buckets are non-nil when one is empty
+	onlyOther := []ArticleView{{ID: 1, CrossFeedCount: 0}}
+	imp, oth := splitImportant(onlyOther)
+	if imp == nil {
+		t.Error("important should be non-nil even when empty, got nil")
+	}
+	if len(imp) != 0 {
+		t.Errorf("important should be empty, got %d items", len(imp))
+	}
+	if len(oth) != 1 {
+		t.Errorf("other should have 1 item, got %d", len(oth))
+	}
 }
