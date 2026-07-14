@@ -53,6 +53,9 @@ func main() {
 	// Create summarization scheduler
 	summarizationScheduler := NewSummarizationScheduler(db, cfg, metrics)
 
+	// Create story-clustering scheduler (backs the digest feature's "important" bucket)
+	clusteringScheduler := NewClusteringScheduler(db, cfg, summarizationScheduler)
+
 	// Create monitor with metrics and circuit breakers
 	monitor := NewRSSMonitor(db, feeds, metrics, cfg, circuitBreakers, summarizationScheduler)
 
@@ -69,7 +72,7 @@ func main() {
 
 	// Start monitoring in goroutine
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(4)
 
 	// Start summarization scheduler
 	go func() {
@@ -83,6 +86,12 @@ func main() {
 	go func() {
 		defer wg.Done()
 		monitor.Start(ctx)
+	}()
+
+	// Start story-clustering scheduler
+	go func() {
+		defer wg.Done()
+		clusteringScheduler.Start(ctx)
 	}()
 
 	// Start API server
