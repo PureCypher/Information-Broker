@@ -47,9 +47,9 @@ const minCrossFeedCountForImportant = 2
 func buildDigestQuery(since time.Time) (string, []interface{}) {
 	query := `SELECT a.id, a.title, a.url, a.summary, a.full_content, a.publish_date,
 		a.fetch_duration_ms, a.feed_url, a.content_hash,
-		(cluster_counts.distinct_feeds - 1) AS cross_feed_count
+		COALESCE(cluster_counts.distinct_feeds - 1, 0) AS cross_feed_count
 		FROM articles a
-		JOIN (
+		LEFT JOIN (
 			SELECT story_cluster_id, COUNT(DISTINCT feed_url) AS distinct_feeds
 			FROM articles
 			WHERE publish_date >= $1 AND story_cluster_id IS NOT NULL

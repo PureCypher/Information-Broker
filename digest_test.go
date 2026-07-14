@@ -48,6 +48,18 @@ func TestBuildDigestQuery(t *testing.T) {
 	}
 }
 
+func TestBuildDigestQueryIncludesUnclusteredArticles(t *testing.T) {
+	since := time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC)
+	q, _ := buildDigestQuery(since)
+
+	if strings.Contains(q, "\n\t\tJOIN (") || !strings.Contains(q, "LEFT JOIN (") {
+		t.Fatalf("query must use LEFT JOIN so unclustered articles (story_cluster_id IS NULL) aren't silently dropped from the result set: %s", q)
+	}
+	if !strings.Contains(q, "COALESCE(cluster_counts.distinct_feeds - 1, 0)") {
+		t.Fatalf("cross_feed_count must default to 0 via COALESCE for unclustered articles, not NULL: %s", q)
+	}
+}
+
 func TestSplitImportant(t *testing.T) {
 	rows := []ArticleView{
 		{ID: 1, CrossFeedCount: 3},
