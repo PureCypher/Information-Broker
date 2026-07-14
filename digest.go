@@ -43,3 +43,16 @@ func buildDigestQuery(since time.Time) (string, []interface{}) {
 		ORDER BY cross_feed_count DESC, a1.publish_date DESC`
 	return query, []interface{}{since}
 }
+
+// splitImportant partitions digest rows into important (>= minCrossFeedCountForImportant
+// other feeds) and everything else, preserving the query's incoming order in both groups.
+func splitImportant(rows []ArticleView) (important, other []ArticleView) {
+	for _, a := range rows {
+		if a.CrossFeedCount >= minCrossFeedCountForImportant {
+			important = append(important, a)
+		} else {
+			other = append(other, a)
+		}
+	}
+	return important, other
+}

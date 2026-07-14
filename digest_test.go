@@ -44,3 +44,19 @@ func TestBuildDigestQuery(t *testing.T) {
 		t.Fatalf("expected single since arg, got %v", args)
 	}
 }
+
+func TestSplitImportant(t *testing.T) {
+	rows := []ArticleView{
+		{ID: 1, CrossFeedCount: 3},
+		{ID: 2, CrossFeedCount: 1},
+		{ID: 3, CrossFeedCount: 2},
+		{ID: 4, CrossFeedCount: 0},
+	}
+	important, other := splitImportant(rows)
+	if len(important) != 2 || important[0].ID != 1 || important[1].ID != 3 {
+		t.Fatalf("important = %+v, want IDs 1,3 in order", important)
+	}
+	if len(other) != 2 || other[0].ID != 2 || other[1].ID != 4 {
+		t.Fatalf("other = %+v, want IDs 2,4 in order", other)
+	}
+}

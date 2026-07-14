@@ -85,15 +85,16 @@ func (s *APIServer) Start() {
 
 // ArticleView is the JSON representation of an article returned by the API.
 type ArticleView struct {
-	ID            int64         `json:"id"`
-	Title         string        `json:"title"`
-	URL           string        `json:"url"`
-	Summary       *string       `json:"summary"`
-	Content       string        `json:"content"`
-	PublishedAt   time.Time     `json:"published_at"`
-	FetchDuration time.Duration `json:"fetch_duration"`
-	FeedURL       string        `json:"feed_url"`
-	ContentHash   string        `json:"content_hash"`
+	ID             int64         `json:"id"`
+	Title          string        `json:"title"`
+	URL            string        `json:"url"`
+	Summary        *string       `json:"summary"`
+	Content        string        `json:"content"`
+	PublishedAt    time.Time     `json:"published_at"`
+	FetchDuration  time.Duration `json:"fetch_duration"`
+	FeedURL        string        `json:"feed_url"`
+	ContentHash    string        `json:"content_hash"`
+	CrossFeedCount int           `json:"cross_feed_count,omitempty"`
 }
 
 // buildArticlesQuery constructs the SQL and ordered args for listing articles,
