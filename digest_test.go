@@ -6,21 +6,35 @@ import (
 	"time"
 )
 
-func TestDigestWindowOrDefault(t *testing.T) {
+func TestDigestSinceOrDefault(t *testing.T) {
+	// 2026-07-15 is a Wednesday, in Q3 and H2 of its year.
+	wed := time.Date(2026, 7, 15, 14, 30, 0, 0, time.UTC)
+	// 2026-02-10 is in Q1 and H1, to check the other half/quarter boundary.
+	feb := time.Date(2026, 2, 10, 9, 0, 0, 0, time.UTC)
+
 	tests := []struct {
+		name       string
+		now        time.Time
 		rangeParam string
-		want       time.Duration
+		want       time.Time
 	}{
-		{"daily", 24 * time.Hour},
-		{"weekly", 7 * 24 * time.Hour},
-		{"monthly", 30 * 24 * time.Hour},
-		{"", 24 * time.Hour},
-		{"garbage", 24 * time.Hour},
+		{"daily", wed, "daily", time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC)},
+		{"weekly aligns to Monday", wed, "weekly", time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC)},
+		{"monthly", wed, "monthly", time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)},
+		{"quarterly Q3", wed, "quarterly", time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)},
+		{"quarterly Q1", feb, "quarterly", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
+		{"halfyearly H2", wed, "halfyearly", time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)},
+		{"halfyearly H1", feb, "halfyearly", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
+		{"yearly", wed, "yearly", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
+		{"empty falls back to daily", wed, "", time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC)},
+		{"garbage falls back to daily", wed, "garbage", time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC)},
 	}
 	for _, tt := range tests {
-		if got := digestWindowOrDefault(tt.rangeParam); got != tt.want {
-			t.Errorf("digestWindowOrDefault(%q) = %v, want %v", tt.rangeParam, got, tt.want)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			if got := digestSinceOrDefault(tt.rangeParam, tt.now); !got.Equal(tt.want) {
+				t.Errorf("digestSinceOrDefault(%q, %v) = %v, want %v", tt.rangeParam, tt.now, got, tt.want)
+			}
+		})
 	}
 }
 

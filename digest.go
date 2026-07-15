@@ -7,17 +7,38 @@ import (
 	"time"
 )
 
-// digestWindowOrDefault maps a digest range parameter to a lookback window.
-// Unknown or empty values fall back to the daily (24h) window — same
-// whitelist-and-normalize style as buildArticlesQuery's sort param.
-func digestWindowOrDefault(rangeParam string) time.Duration {
+// digestSinceOrDefault maps a digest range parameter to the start of the
+// CURRENT calendar period, not a rolling look-back window: "monthly" means
+// since the 1st of the current month (e.g. July 1st while browsing in
+// July), not "the last 30 days", which can span parts of two different
+// months. Unknown or empty values fall back to "daily" — same
+// whitelist-and-normalize style as buildArticlesQuery's sort param. Weeks
+// start on Monday. now should be normalized to a single timezone (UTC) by
+// the caller so calendar boundaries are computed consistently.
+func digestSinceOrDefault(rangeParam string, now time.Time) time.Time {
+	y, m, d := now.Date()
+	loc := now.Location()
+	startOfDay := time.Date(y, m, d, 0, 0, 0, 0, loc)
+
 	switch rangeParam {
 	case "weekly":
-		return 7 * 24 * time.Hour
+		daysSinceMonday := (int(now.Weekday()) + 6) % 7 // Monday=0 ... Sunday=6
+		return startOfDay.AddDate(0, 0, -daysSinceMonday)
 	case "monthly":
-		return 30 * 24 * time.Hour
-	default:
-		return 24 * time.Hour
+		return time.Date(y, m, 1, 0, 0, 0, 0, loc)
+	case "quarterly":
+		quarterStartMonth := time.Month(((int(m)-1)/3)*3 + 1)
+		return time.Date(y, quarterStartMonth, 1, 0, 0, 0, 0, loc)
+	case "halfyearly":
+		halfStartMonth := time.January
+		if m > time.June {
+			halfStartMonth = time.July
+		}
+		return time.Date(y, halfStartMonth, 1, 0, 0, 0, 0, loc)
+	case "yearly":
+		return time.Date(y, time.January, 1, 0, 0, 0, 0, loc)
+	default: // "daily"
+		return startOfDay
 	}
 }
 
@@ -25,7 +46,6 @@ func digestWindowOrDefault(rangeParam string) time.Duration {
 // "important" bucket of a digest: a story counts as important once at least
 // this many *other* feeds ran something with a similar title in the window.
 const minCrossFeedCountForImportant = 2
-
 
 // buildDigestQuery returns the SQL and args for the cross-feed importance
 // heuristic: for every article published since `since`, count how many
@@ -83,10 +103,14 @@ type DigestResult struct {
 	Other     []ArticleView `json:"other"`
 }
 
-var validDigestRanges = map[string]bool{"daily": true, "weekly": true, "monthly": true}
+var validDigestRanges = map[string]bool{
+	"daily": true, "weekly": true, "monthly": true,
+	"quarterly": true, "halfyearly": true, "yearly": true,
+}
 
 // getArticlesDigest returns articles bucketed into "important" (multi-feed
-// coverage) and "other" for the requested daily/weekly/monthly window.
+// coverage) and "other" since the start of the requested calendar period
+// (day/week/month/quarter/half-year/year).
 func (s *APIServer) getArticlesDigest(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -97,7 +121,7 @@ func (s *APIServer) getArticlesDigest(w http.ResponseWriter, r *http.Request) {
 	if !validDigestRanges[rangeParam] {
 		rangeParam = "daily"
 	}
-	since := time.Now().Add(-digestWindowOrDefault(rangeParam))
+	since := digestSinceOrDefault(rangeParam, time.Now().UTC())
 
 	query, args := buildDigestQuery(since)
 	rows, err := s.db.Query(query, args...)
