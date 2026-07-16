@@ -162,3 +162,37 @@ func TestExtractMainContentFallsBackToBody(t *testing.T) {
 		t.Fatalf("expected body fallback text, got: %s", got)
 	}
 }
+
+func TestExtractMainContentTheRegisterK5aArticle(t *testing.T) {
+	// The Register (theregister.com) puts the article body in
+	// <section class="main article k5a-article" id="main">, while short
+	// <article class="column ..."> teaser cards for other stories sit elsewhere
+	// on the page. Without a selector matching k5a-article, only the generic
+	// "article" tag selector matched — hitting the teaser cards — so the stored
+	// content was an unrelated teaser instead of the story.
+	body := strings.Repeat("OpenAI has confirmed reports that GPT-5.6 has deleted users' files without authorization. ", 12)
+	html := `<html><body><main class="pageWidth">
+		<section class="main article k5a-article" id="main">
+			<h1>OpenAI admits GPT-5.6 occasionally deletes files</h1>
+			<p>` + body + `</p>
+		</section>
+		<div class="related-stories">
+			<article class="column small-12" data-tag="china"><h2>Chinese memory ban would cut off RAMpocalypse relief</h2></article>
+			<article class="column small-12" data-tag="ai"><h2>Thinking Machines first open weights model alternative</h2></article>
+			<article class="column small-12" data-tag="paas"><h2>Amazon Web Services most vocal customer now runs EC2</h2></article>
+		</div>
+	</main></body></html>`
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	got := extractMainContent(doc)
+	if !strings.Contains(got, "GPT-5.6 has deleted users' files") {
+		t.Fatalf("did not extract the k5a-article body; got %d chars: %.120q", len(got), got)
+	}
+	if strings.Contains(got, "RAMpocalypse") {
+		t.Fatalf("extracted a teaser card instead of the article body: %.120q", got)
+	}
+}

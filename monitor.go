@@ -581,26 +581,50 @@ func extractMainContent(doc *goquery.Document) string {
 	// stored) as if they were article prose.
 	doc.Find("#ar-widget").Remove()
 
-	specificSelectors := []string{
+	// theregister.com labels every ad slot with <span class="ad-label">REG AD</span>;
+	// strip them so ad-slot labels don't pollute the extracted article text.
+	doc.Find(".ad-label").Remove()
+
+	// Precise, high-confidence article-body selectors. Within this tier the
+	// longest match wins (a real post body dwarfs a related-post teaser card;
+	// this is the hackread.com fix). ".k5a-article" is theregister.com's
+	// <section class="... k5a-article"> article body.
+	preciseSelectors := []string{
 		"article",
 		".post-content",
 		".entry-content",
-		".content",
 		".article-body",
 		".post-body",
+		".k5a-article",
+	}
+	// Broad page wrappers, used ONLY when no precise selector matched — some
+	// sites (Bootstrap admin themes like cvefeed.io) have no article/
+	// .entry-content wrapper at all. These must never override a precise match:
+	// on theregister.com .content/.page-content span the whole page (nav, ads,
+	// "more from" grids) and are far longer than the real story, so treating
+	// them as equals to precise selectors picked chrome over the article.
+	fallbackSelectors := []string{
+		".content",
 		".page-content",
 		".main-content",
 	}
 
-	var content string
-	for _, selector := range specificSelectors {
-		doc.Find(selector).Each(func(_ int, s *goquery.Selection) {
-			if text := s.Text(); len(text) > len(content) {
-				content = text
-			}
-		})
+	longest := func(selectors []string) string {
+		var content string
+		for _, selector := range selectors {
+			doc.Find(selector).Each(func(_ int, s *goquery.Selection) {
+				if text := s.Text(); len(text) > len(content) {
+					content = text
+				}
+			})
+		}
+		return content
 	}
 
+	content := longest(preciseSelectors)
+	if content == "" {
+		content = longest(fallbackSelectors)
+	}
 	if content == "" {
 		content = doc.Find("main").First().Text()
 	}
