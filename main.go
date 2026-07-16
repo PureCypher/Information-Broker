@@ -21,6 +21,24 @@ func main() {
 	// Load configuration
 	cfg := config.Load()
 
+	// One-off maintenance: `information-broker backfill <url-substring>` re-fetches
+	// and re-extracts matching articles with the current extractor, then exits.
+	if len(os.Args) > 1 && os.Args[1] == "backfill" {
+		pattern := "theregister.com"
+		if len(os.Args) > 2 {
+			pattern = os.Args[2]
+		}
+		db, err := initDatabase(cfg)
+		if err != nil {
+			log.Fatalf("backfill: db: %v", err)
+		}
+		defer db.Close()
+		if err := runBackfill(db, cfg, pattern); err != nil {
+			log.Fatalf("backfill: %v", err)
+		}
+		return
+	}
+
 	// Setup logging
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.Println("Starting Information Broker RSS Monitor")
