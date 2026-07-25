@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -67,7 +68,7 @@ const minCrossFeedCountForImportant = 2
 func buildDigestQuery(since time.Time) (string, []interface{}) {
 	query := `SELECT a.id, a.title, a.url, a.summary, a.full_content, a.publish_date,
 		a.fetch_duration_ms, a.feed_url, a.content_hash,
-		COALESCE(cluster_counts.distinct_feeds - 1, 0) AS cross_feed_count
+		COALESCE(cluster_counts.distinct_feeds - 1, 0) AS cross_feed_count, a.story_cluster_id
 		FROM articles a
 		LEFT JOIN (
 			SELECT story_cluster_id, COUNT(DISTINCT feed_url) AS distinct_feeds
@@ -136,15 +137,21 @@ func (s *APIServer) getArticlesDigest(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var a ArticleView
 		var fetchDurationMs int64
+		var clusterID sql.NullInt64
 		err := rows.Scan(
 			&a.ID, &a.Title, &a.URL, &a.Summary, &a.Content, &a.PublishedAt,
-			&fetchDurationMs, &a.FeedURL, &a.ContentHash, &a.CrossFeedCount,
+			&fetchDurationMs, &a.FeedURL, &a.ContentHash, &a.CrossFeedCount, &clusterID,
 		)
 		if err != nil {
 			log.Printf("Row scan error: %v", err)
 			continue
 		}
 		a.FetchDuration = time.Duration(fetchDurationMs) * time.Millisecond
+		if clusterID.Valid {
+			// clusterID is redeclared each iteration, so every article gets
+			// its own pointer rather than aliasing a shared loop variable.
+			a.StoryClusterID = &clusterID.Int64
+		}
 		all = append(all, a)
 	}
 

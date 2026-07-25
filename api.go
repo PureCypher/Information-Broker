@@ -96,6 +96,10 @@ type ArticleView struct {
 	FeedURL        string        `json:"feed_url"`
 	ContentHash    string        `json:"content_hash"`
 	CrossFeedCount int           `json:"cross_feed_count,omitempty"`
+	// StoryClusterID is the digest clustering key (the seed article's own id).
+	// Pointer + omitempty: NULL for articles ClusteringScheduler hasn't reached
+	// yet, and absent entirely from /articles, which doesn't select the column.
+	StoryClusterID *int64 `json:"story_cluster_id,omitempty"`
 }
 
 // buildArticlesQuery constructs the SQL and ordered args for listing articles,

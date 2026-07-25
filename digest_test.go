@@ -74,6 +74,22 @@ func TestBuildDigestQueryIncludesUnclusteredArticles(t *testing.T) {
 	}
 }
 
+func TestBuildDigestQuerySelectsStoryClusterID(t *testing.T) {
+	since := time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC)
+	q, _ := buildDigestQuery(since)
+
+	// The frontend groups digest rows by cluster, so the cluster key itself
+	// has to come back on the row -- cross_feed_count alone says how many
+	// feeds covered a story but not which articles those were. Asserted
+	// against the SELECT list, not the whole query: a.story_cluster_id also
+	// appears in the LEFT JOIN's ON clause, which would false-green a plain
+	// substring check.
+	selectList, _, _ := strings.Cut(q, "\n\t\tFROM articles a")
+	if !strings.Contains(selectList, "AS cross_feed_count, a.story_cluster_id") {
+		t.Fatalf("digest SELECT list must expose a.story_cluster_id for client-side grouping: %s", selectList)
+	}
+}
+
 func TestSplitImportant(t *testing.T) {
 	rows := []ArticleView{
 		{ID: 1, CrossFeedCount: 3},
