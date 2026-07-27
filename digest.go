@@ -92,6 +92,15 @@ const minCrossFeedCountForImportant = 2
 // $1 bounds which articles are LISTED (the display window), $2 bounds how
 // far back coverage is COUNTED (the corroboration window). Collapsing them
 // back into one parameter reintroduces the empty-daily-digest bug.
+//
+// The `<= now()` upper bound keeps the digest retrospective. A few feeds
+// (brighttalk.com, darkreading.com) date scheduled webinars at the event
+// date, weeks ahead; with no upper bound those satisfy every window until
+// the event happens, so an unaired webcast pinned itself to the top of the
+// daily digest. They are legitimate entries, just not "what happened
+// recently" -- the frontend lists them separately via splitUpcoming. The
+// count subquery is deliberately left unbounded: a future-dated sibling
+// still evidences that a story is being covered.
 func buildDigestQuery(since, countSince time.Time) (string, []interface{}) {
 	query := `SELECT a.id, a.title, a.url, a.summary, a.full_content, a.publish_date,
 		a.fetch_duration_ms, a.feed_url, a.content_hash,
@@ -103,7 +112,7 @@ func buildDigestQuery(since, countSince time.Time) (string, []interface{}) {
 			WHERE publish_date >= $2 AND story_cluster_id IS NOT NULL
 			GROUP BY story_cluster_id
 		) cluster_counts ON cluster_counts.story_cluster_id = a.story_cluster_id
-		WHERE a.publish_date >= $1
+		WHERE a.publish_date >= $1 AND a.publish_date <= now()
 		ORDER BY cross_feed_count DESC, a.publish_date DESC`
 	return query, []interface{}{since, countSince}
 }

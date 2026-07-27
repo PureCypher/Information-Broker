@@ -157,6 +157,22 @@ func TestBuildDigestQueryCountsOverTheWiderWindow(t *testing.T) {
 	}
 }
 
+// Some feeds date entries in the future on purpose -- brighttalk.com and
+// darkreading.com publish scheduled webinars whose publish_date is the event
+// date, weeks out. With no upper bound they satisfy `publish_date >= since`
+// in every window until the event happens, so an unaired webcast ranked at
+// the top of the "last 24 hours" digest and stayed there. The digest is
+// retrospective; the frontend surfaces these separately (splitUpcoming).
+func TestBuildDigestQueryExcludesFutureDatedArticles(t *testing.T) {
+	since := time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC)
+	q, _ := buildDigestQuery(since, since.AddDate(0, 0, -35))
+
+	outer := q[strings.Index(q, ") cluster_counts"):]
+	if !strings.Contains(outer, "a.publish_date <= now()") {
+		t.Fatalf("digest must not list articles dated in the future: %s", outer)
+	}
+}
+
 func TestBuildDigestQueryIncludesUnclusteredArticles(t *testing.T) {
 	since := time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC)
 	q, _ := buildDigestQuery(since, since.AddDate(0, 0, -35))
