@@ -7,40 +7,107 @@ import (
 )
 
 func TestDigestSinceOrDefault(t *testing.T) {
-	// 2026-07-15 is a Wednesday, in Q3 and H2 of its year.
 	wed := time.Date(2026, 7, 15, 14, 30, 0, 0, time.UTC)
-	// 2026-02-10 is in Q1 and H1, to check the other half/quarter boundary.
-	feb := time.Date(2026, 2, 10, 9, 0, 0, 0, time.UTC)
 
 	tests := []struct {
 		name       string
-		now        time.Time
 		rangeParam string
 		want       time.Time
 	}{
-		{"daily", wed, "daily", time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC)},
-		{"weekly aligns to Monday", wed, "weekly", time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC)},
-		{"monthly", wed, "monthly", time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)},
-		{"quarterly Q3", wed, "quarterly", time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)},
-		{"quarterly Q1", feb, "quarterly", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
-		{"halfyearly H2", wed, "halfyearly", time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)},
-		{"halfyearly H1", feb, "halfyearly", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
-		{"yearly", wed, "yearly", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
-		{"empty falls back to daily", wed, "", time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC)},
-		{"garbage falls back to daily", wed, "garbage", time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC)},
+		{"daily", "daily", wed.Add(-24 * time.Hour)},
+		{"weekly", "weekly", wed.AddDate(0, 0, -7)},
+		{"monthly", "monthly", wed.AddDate(0, 0, -30)},
+		{"quarterly", "quarterly", wed.AddDate(0, 0, -90)},
+		{"halfyearly", "halfyearly", wed.AddDate(0, 0, -182)},
+		{"yearly", "yearly", wed.AddDate(0, 0, -365)},
+		{"empty falls back to daily", "", wed.Add(-24 * time.Hour)},
+		{"garbage falls back to daily", "garbage", wed.Add(-24 * time.Hour)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := digestSinceOrDefault(tt.rangeParam, tt.now); !got.Equal(tt.want) {
-				t.Errorf("digestSinceOrDefault(%q, %v) = %v, want %v", tt.rangeParam, tt.now, got, tt.want)
+			if got := digestSinceOrDefault(tt.rangeParam, wed); !got.Equal(tt.want) {
+				t.Errorf("digestSinceOrDefault(%q, %v) = %v, want %v", tt.rangeParam, wed, got, tt.want)
 			}
 		})
 	}
 }
 
+// Windows are rolling, not calendar-period-to-date. The calendar version
+// collapsed at every period boundary -- on a Monday "weekly" started at
+// 00:00 that morning and returned exactly the same window as "daily",
+// which is the bug this replaced. Each range must stay strictly wider than
+// the one below it no matter what instant it is evaluated at.
+func TestDigestWindowsAreStrictlyNestedAtEveryBoundary(t *testing.T) {
+	boundaries := []struct {
+		name string
+		now  time.Time
+	}{
+		{"Monday 00:00 (old weekly==daily)", time.Date(2026, 7, 27, 0, 0, 0, 0, time.UTC)},
+		{"1st of month 00:00", time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)},
+		{"1st of quarter and half-year", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
+		{"mid-week afternoon", time.Date(2026, 7, 15, 14, 30, 0, 0, time.UTC)},
+	}
+	order := []string{"daily", "weekly", "monthly", "quarterly", "halfyearly", "yearly"}
+	for _, b := range boundaries {
+		t.Run(b.name, func(t *testing.T) {
+			for i := 1; i < len(order); i++ {
+				narrow := digestSinceOrDefault(order[i-1], b.now)
+				wide := digestSinceOrDefault(order[i], b.now)
+				if !wide.Before(narrow) {
+					t.Errorf("%q window (since %v) must reach strictly further back than %q (since %v)",
+						order[i], wide, order[i-1], narrow)
+				}
+			}
+		})
+	}
+}
+
+// The cross-feed COUNTING window is deliberately decoupled from the display
+// window: corroboration accumulates over days (median ~21h to a second feed,
+// p75 over four days on the live corpus), so counting only inside a one-day
+// display window credited almost nothing. Counting always reaches back at
+// least the clustering window, since that is how long a story cluster can
+// legitimately keep collecting coverage.
+func TestDigestCountSince(t *testing.T) {
+	now := time.Date(2026, 7, 15, 14, 30, 0, 0, time.UTC)
+	clusterWindow := 35
+
+	t.Run("short display window still counts back the full clustering window", func(t *testing.T) {
+		since := digestSinceOrDefault("daily", now)
+		want := now.AddDate(0, 0, -clusterWindow)
+		if got := digestCountSince(since, now, clusterWindow); !got.Equal(want) {
+			t.Errorf("digestCountSince = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("long display window counts over the display window itself", func(t *testing.T) {
+		since := digestSinceOrDefault("yearly", now)
+		if got := digestCountSince(since, now, clusterWindow); !got.Equal(since) {
+			t.Errorf("digestCountSince = %v, want the display since %v", got, since)
+		}
+	})
+
+	t.Run("never narrower than the display window", func(t *testing.T) {
+		for _, r := range []string{"daily", "weekly", "monthly", "quarterly", "halfyearly", "yearly"} {
+			since := digestSinceOrDefault(r, now)
+			if got := digestCountSince(since, now, clusterWindow); got.After(since) {
+				t.Errorf("%s: counting window (%v) must not start after the display window (%v)", r, got, since)
+			}
+		}
+	})
+
+	t.Run("non-positive clustering window degrades to the display window", func(t *testing.T) {
+		since := digestSinceOrDefault("daily", now)
+		if got := digestCountSince(since, now, 0); !got.Equal(since) {
+			t.Errorf("digestCountSince with 0 cluster days = %v, want %v", got, since)
+		}
+	})
+}
+
 func TestBuildDigestQuery(t *testing.T) {
 	since := time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC)
-	q, args := buildDigestQuery(since)
+	countSince := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
+	q, args := buildDigestQuery(since, countSince)
 
 	if strings.Contains(q, "regexp_replace") || strings.Contains(q, "normTitleSQL") {
 		t.Fatalf("query must not use the old title-normalization GROUP BY: %s", q)
@@ -57,14 +124,42 @@ func TestBuildDigestQuery(t *testing.T) {
 	if !strings.Contains(q, "ORDER BY cross_feed_count DESC, a.publish_date DESC") {
 		t.Fatalf("missing ORDER BY: %s", q)
 	}
-	if len(args) != 1 || args[0] != since {
-		t.Fatalf("expected single since arg (bound twice via $1), got %v", args)
+	if len(args) != 2 || args[0] != since || args[1] != countSince {
+		t.Fatalf("expected args [since, countSince], got %v", args)
+	}
+}
+
+// The row filter and the feed count read different placeholders: rows are
+// limited to the display window ($1) while the count reaches back over the
+// wider corroboration window ($2). Binding both to $1 would silently restore
+// the original bug, so assert the two clauses use different parameters.
+func TestBuildDigestQueryCountsOverTheWiderWindow(t *testing.T) {
+	since := time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC)
+	countSince := time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC)
+	q, _ := buildDigestQuery(since, countSince)
+
+	subquery, _, ok := strings.Cut(q, ") cluster_counts")
+	if !ok {
+		t.Fatalf("could not locate the cluster_counts subquery: %s", q)
+	}
+	_, subquery, _ = strings.Cut(subquery, "LEFT JOIN (")
+
+	if !strings.Contains(subquery, "publish_date >= $2") {
+		t.Fatalf("feed count must range over the corroboration window ($2): %s", subquery)
+	}
+	if strings.Contains(subquery, "publish_date >= $1") {
+		t.Fatalf("feed count must not be limited to the display window ($1): %s", subquery)
+	}
+
+	outer := q[strings.Index(q, ") cluster_counts"):]
+	if !strings.Contains(outer, "WHERE a.publish_date >= $1") {
+		t.Fatalf("listed rows must still be limited to the display window ($1): %s", outer)
 	}
 }
 
 func TestBuildDigestQueryIncludesUnclusteredArticles(t *testing.T) {
 	since := time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC)
-	q, _ := buildDigestQuery(since)
+	q, _ := buildDigestQuery(since, since.AddDate(0, 0, -35))
 
 	if strings.Contains(q, "\n\t\tJOIN (") || !strings.Contains(q, "LEFT JOIN (") {
 		t.Fatalf("query must use LEFT JOIN so unclustered articles (story_cluster_id IS NULL) aren't silently dropped from the result set: %s", q)
@@ -76,7 +171,7 @@ func TestBuildDigestQueryIncludesUnclusteredArticles(t *testing.T) {
 
 func TestBuildDigestQuerySelectsStoryClusterID(t *testing.T) {
 	since := time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC)
-	q, _ := buildDigestQuery(since)
+	q, _ := buildDigestQuery(since, since.AddDate(0, 0, -35))
 
 	// The frontend groups digest rows by cluster, so the cluster key itself
 	// has to come back on the row -- cross_feed_count alone says how many

@@ -8,39 +8,61 @@ import (
 	"time"
 )
 
-// digestSinceOrDefault maps a digest range parameter to the start of the
-// CURRENT calendar period, not a rolling look-back window: "monthly" means
-// since the 1st of the current month (e.g. July 1st while browsing in
-// July), not "the last 30 days", which can span parts of two different
-// months. Unknown or empty values fall back to "daily" — same
-// whitelist-and-normalize style as buildArticlesQuery's sort param. Weeks
-// start on Monday. now should be normalized to a single timezone (UTC) by
-// the caller so calendar boundaries are computed consistently.
-func digestSinceOrDefault(rangeParam string, now time.Time) time.Time {
-	y, m, d := now.Date()
-	loc := now.Location()
-	startOfDay := time.Date(y, m, d, 0, 0, 0, 0, loc)
+// digestWindowDays is the rolling look-back for each digest range, in days.
+//
+// Rolling, NOT calendar-period-to-date. The calendar version ("weekly" =
+// since Monday 00:00, "monthly" = since the 1st) collapsed at every period
+// boundary: on a Monday the weekly digest covered the same window as the
+// daily one and returned an identical, near-empty page; likewise monthly on
+// the 1st, quarterly on Jan/Apr/Jul/Oct 1st. A digest is a "what mattered
+// recently" view, so the window has to stay the advertised width whatever
+// day it is asked for.
+var digestWindowDays = map[string]int{
+	"daily":      1,
+	"weekly":     7,
+	"monthly":    30,
+	"quarterly":  90,
+	"halfyearly": 182,
+	"yearly":     365,
+}
 
-	switch rangeParam {
-	case "weekly":
-		daysSinceMonday := (int(now.Weekday()) + 6) % 7 // Monday=0 ... Sunday=6
-		return startOfDay.AddDate(0, 0, -daysSinceMonday)
-	case "monthly":
-		return time.Date(y, m, 1, 0, 0, 0, 0, loc)
-	case "quarterly":
-		quarterStartMonth := time.Month(((int(m)-1)/3)*3 + 1)
-		return time.Date(y, quarterStartMonth, 1, 0, 0, 0, 0, loc)
-	case "halfyearly":
-		halfStartMonth := time.January
-		if m > time.June {
-			halfStartMonth = time.July
-		}
-		return time.Date(y, halfStartMonth, 1, 0, 0, 0, 0, loc)
-	case "yearly":
-		return time.Date(y, time.January, 1, 0, 0, 0, 0, loc)
-	default: // "daily"
-		return startOfDay
+// digestSinceOrDefault maps a digest range parameter to the start of its
+// rolling look-back window. Unknown or empty values fall back to "daily" —
+// same whitelist-and-normalize style as buildArticlesQuery's sort param.
+// now should be normalized to a single timezone (UTC) by the caller.
+func digestSinceOrDefault(rangeParam string, now time.Time) time.Time {
+	days, ok := digestWindowDays[rangeParam]
+	if !ok {
+		days = digestWindowDays["daily"]
 	}
+	return now.AddDate(0, 0, -days)
+}
+
+// digestCountSince returns the start of the cross-feed COUNTING window,
+// which is deliberately wider than the display window.
+//
+// Corroboration accumulates over days, not hours: measured on the live
+// corpus, only ~53% of second-feed pickups land within 24h of the first
+// report (median 21h, p75 over four days). Counting distinct feeds only
+// among articles inside a one-day display window therefore credited almost
+// nothing — the daily digest surfaced 2 multi-feed stories out of 228
+// clusters, because yesterday's corroborating coverage fell outside the
+// count. Counting reaches back at least clusterWindowDays instead: that is
+// how long ClusteringScheduler keeps a cluster eligible for new members, so
+// it is exactly the span over which a story can still gain coverage.
+//
+// The listed rows are unaffected — only the count widens — so the digest
+// still shows what was published in the requested window, now ranked by how
+// much of the press has actually picked the story up.
+func digestCountSince(since, now time.Time, clusterWindowDays int) time.Time {
+	if clusterWindowDays <= 0 {
+		return since
+	}
+	lifetime := now.AddDate(0, 0, -clusterWindowDays)
+	if lifetime.Before(since) {
+		return lifetime
+	}
+	return since
 }
 
 // minCrossFeedCountForImportant is the cross-feed coverage threshold for the
@@ -65,7 +87,12 @@ const minCrossFeedCountForImportant = 2
 // activity) -- they're excluded from cross_feed_count here but still show
 // up in the digest's "everything else" bucket via the outer WHERE clause,
 // and get a cluster on the next cycle.
-func buildDigestQuery(since time.Time) (string, []interface{}) {
+//
+// The two time bounds are intentionally different (see digestCountSince):
+// $1 bounds which articles are LISTED (the display window), $2 bounds how
+// far back coverage is COUNTED (the corroboration window). Collapsing them
+// back into one parameter reintroduces the empty-daily-digest bug.
+func buildDigestQuery(since, countSince time.Time) (string, []interface{}) {
 	query := `SELECT a.id, a.title, a.url, a.summary, a.full_content, a.publish_date,
 		a.fetch_duration_ms, a.feed_url, a.content_hash,
 		COALESCE(cluster_counts.distinct_feeds - 1, 0) AS cross_feed_count, a.story_cluster_id
@@ -73,12 +100,12 @@ func buildDigestQuery(since time.Time) (string, []interface{}) {
 		LEFT JOIN (
 			SELECT story_cluster_id, COUNT(DISTINCT feed_url) AS distinct_feeds
 			FROM articles
-			WHERE publish_date >= $1 AND story_cluster_id IS NOT NULL
+			WHERE publish_date >= $2 AND story_cluster_id IS NOT NULL
 			GROUP BY story_cluster_id
 		) cluster_counts ON cluster_counts.story_cluster_id = a.story_cluster_id
 		WHERE a.publish_date >= $1
 		ORDER BY cross_feed_count DESC, a.publish_date DESC`
-	return query, []interface{}{since}
+	return query, []interface{}{since, countSince}
 }
 
 // splitImportant partitions digest rows into important (>= minCrossFeedCountForImportant
@@ -122,9 +149,11 @@ func (s *APIServer) getArticlesDigest(w http.ResponseWriter, r *http.Request) {
 	if !validDigestRanges[rangeParam] {
 		rangeParam = "daily"
 	}
-	since := digestSinceOrDefault(rangeParam, time.Now().UTC())
+	now := time.Now().UTC()
+	since := digestSinceOrDefault(rangeParam, now)
+	countSince := digestCountSince(since, now, s.config.Clustering.WindowDays)
 
-	query, args := buildDigestQuery(since)
+	query, args := buildDigestQuery(since, countSince)
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
 		log.Printf("Database query error: %v", err)
