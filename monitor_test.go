@@ -488,6 +488,49 @@ func TestExtractMainContentDropsSecurityAffairsTitleBlock(t *testing.T) {
 	}
 }
 
+func TestExtractMainContentDropsSubtitleHeadlineAndShareThis(t *testing.T) {
+	// securityaffairs.com row 209 (2026-10): the duplicate headline h2
+	// carries an editorial subtitle after the headline text ("..., per
+	// Cybereason."), so an exact title match never fires; and a
+	// sharethis-inline-share-buttons div sits between the hero image and the
+	// prose. The prefix rule (headings only) must drop the h2, the sharethis
+	// widget must be stripped, and a genuine lead paragraph that happens to
+	// open with the title text must survive.
+	prose := strings.Repeat("Cybereason researchers observed the gang calling affiliates to negotiate ransom terms. ", 8)
+	html := `<html><body>
+		<div class="article-details-block wow fadeInUp">
+			<img class="img-fluid mb-4" src="https://securityaffairs.com/wp/hero.png" alt=""/>
+			<div style="margin-top: 0px; margin-bottom: 0px;" class="sharethis-inline-share-buttons"></div>
+			<h2 class="wp-block-heading">Qilin ransomware gang now offers a “Call Lawyer” feature to pressure victims, per Cybereason.</h2>
+			<p>` + prose + `</p>
+		</div>
+	</body></html>`
+
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+	title := "Qilin ransomware gang now offers a “Call Lawyer” feature to pressure victims"
+	got, htmlOut := extractMainContent(doc, title)
+	if strings.Contains(got, "per Cybereason") || strings.Contains(htmlOut, "wp-block-heading") {
+		t.Fatalf("subtitle-carrying duplicate h2 survived: %.200q / %.200q", got, htmlOut)
+	}
+	if strings.Contains(htmlOut, "sharethis") {
+		t.Fatalf("sharethis widget survived in HTML: %.200q", htmlOut)
+	}
+	if !strings.Contains(got, "Cybereason researchers observed") {
+		t.Fatalf("prose missing: %.200q", got)
+	}
+
+	// A lead paragraph that opens with the title text is real prose (the
+	// prefix rule is heading-only) and must survive.
+	leadDoc, _ := goquery.NewDocumentFromReader(strings.NewReader(
+		`<html><body><div class="article-details-block"><h2>` + title + `, per Cybereason.</h2>
+		<p>` + title + ` — the FBI issued a joint advisory this morning, and the
+		` + prose + `</p></div></body></html>`))
+	got2, _ := extractMainContent(leadDoc, title)
+	if !strings.Contains(got2, "joint advisory") {
+		t.Fatalf("lead paragraph opening with title text was dropped: %.200q", got2)
+	}
+}
+
 func TestExtractMainContentKeepsSubtitleAndGenuineH1(t *testing.T) {
 	// theregister.com: the h1.headline matches the RSS title and must be
 	// dropped, but its <p class="subtitle"> is real editorial content and a

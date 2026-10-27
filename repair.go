@@ -53,15 +53,18 @@ func selectRepairCandidates(rows []repairRow, all bool, limit int) []repairRow {
 					break
 				}
 			}
-			// A body whose first line equals the article title carries a
-			// body-embedded duplicate headline (publisher title/byline block
-			// inside the prose container). Re-extracting with the
-			// leading-title drop is the only way to clean those rows, so
-			// flag them too. A false positive costs one re-fetch and no
-			// change — updates happen only when the extracted text differs.
+			// A body whose first line equals — or starts with — the article
+			// title carries a body-embedded duplicate headline (publisher
+			// title/byline block inside the prose container; securityaffairs
+			// row 209's h2 appends an editorial subtitle to the headline).
+			// Re-extracting with the leading-title drop is the only way to
+			// clean those rows, so flag them too. A false positive costs one
+			// re-fetch and no change — updates happen only when the extracted
+			// text differs.
 			if !contaminated {
 				firstLine := strings.TrimSpace(strings.SplitN(r.FullContent, "\n", 2)[0])
-				if firstLine != "" && strings.EqualFold(firstLine, strings.TrimSpace(r.Title)) {
+				lowerFirst, lowerTitle := strings.ToLower(firstLine), strings.ToLower(strings.TrimSpace(r.Title))
+				if lowerFirst != "" && lowerTitle != "" && strings.HasPrefix(lowerFirst, lowerTitle) {
 					contaminated = true
 				}
 			}

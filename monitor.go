@@ -828,7 +828,7 @@ func extractMainContent(doc *goquery.Document, title string) (text, bodyHTML str
 	best.Find("header, nav, footer, form, button, " +
 		"[x-show], [x-cloak], [hidden], [aria-hidden='true'], " +
 		"[role='toolbar'], [role='menu'], [role='menubar'], [role='navigation'], " +
-		".social-share, .share-buttons, .sharing-links").Remove()
+		".social-share, .share-buttons, .sharing-links, [class*='sharethis']").Remove()
 	stripChrome("aside")
 
 	// A publisher's leading <h1> that repeats the article title duplicates
@@ -840,14 +840,31 @@ func extractMainContent(doc *goquery.Document, title string) (text, bodyHTML str
 	// pass "" to skip this check.
 	if norm(title) != "" {
 		// securityaffairs.com wraps its duplicate headline in an h2 inside a
-		// .common-heading.article-title div that is the container's first
-		// child — the h1-only check below never sees it. Drop any leading
-		// child whose entire text is the title: the reading page renders the
-		// headline itself, so a body that restates it as its first block is
-		// duplication noise. Exact match keeps genuine lead paragraphs and
-		// section headings.
-		if first := best.Children().First(); first.Length() > 0 && norm(first.Text()) == norm(title) {
-			first.Remove()
+		// .common-heading.article-title div (row 90330) or straight after the
+		// hero image (row 209: <img>, sharethis widget, <h2>headline +
+		// editorial subtitle</h2>) — the first-child and h1-only checks never
+		// see those. Scan the container's leading chrome zone: drop any
+		// leading child whose entire text is the title, and any leading
+		// h1/h2/h3 whose text starts with the title (the h2 carries an
+		// editorial subtitle after the headline). The reading page renders
+		// the headline itself, so a body that opens by restating it is
+		// duplication noise. The prefix rule is heading-only so a genuine
+		// lead paragraph that happens to open with the title text survives.
+		// The scan stops at the first real content block.
+		if tt := norm(title); tt != "" {
+			children := best.Children()
+			for i := 0; i < children.Length(); i++ {
+				c := children.Eq(i)
+				if c.Is("img, picture, figure, svg, video, source") || norm(c.Text()) == "" {
+					continue // hero/media or empty spacer nodes
+				}
+				ft := norm(c.Text())
+				if ft == tt || (strings.HasPrefix(ft, tt) && c.Is("h1, h2, h3")) {
+					c.Remove()
+					continue
+				}
+				break // first real content block reached
+			}
 		}
 		best.Find("h1").First().Each(func(_ int, s *goquery.Selection) {
 			if norm(s.Text()) == norm(title) {

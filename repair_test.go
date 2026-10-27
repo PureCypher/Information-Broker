@@ -29,6 +29,26 @@ func TestSelectRepairCandidatesOnlyContaminated(t *testing.T) {
 	}
 }
 
+func TestSelectRepairCandidatesTitlePrefix(t *testing.T) {
+	// securityaffairs row 209's duplicate headline h2 appends an editorial
+	// subtitle ("..., per Cybereason."), so the stored first line starts
+	// with the title but is longer — an exact-match selector misses it.
+	// Prefix matches (case-insensitive) must be selected; a first line that
+	// merely mentions part of the title must not.
+	rows := []repairRow{
+		{ID: 1, URL: "https://securityaffairs.com/a", Title: "Qilin gang offers a Call Lawyer feature",
+			FullContent: "Qilin gang offers a Call Lawyer feature, per Cybereason.\n\nReal body..."},
+		{ID: 2, URL: "https://securityaffairs.com/b", Title: "Qilin gang offers a Call Lawyer feature",
+			FullContent: "Researchers say the Qilin gang offers a Call Lawyer feature to affiliates."},
+		{ID: 3, URL: "https://securityaffairs.com/c", Title: "Qilin gang offers a Call Lawyer feature",
+			FullContent: "QILIN GANG OFFERS A CALL LAWYER FEATURE, PER CYBEREASON.\nBody..."},
+	}
+	got := selectRepairCandidates(rows, false, 0)
+	if len(got) != 2 || got[0].ID != 1 || got[1].ID != 3 {
+		t.Fatalf("expected exactly the prefix-duplicate rows 1 and 3, got %+v", got)
+	}
+}
+
 func TestSelectRepairCandidatesAll(t *testing.T) {
 	rows := []repairRow{
 		{ID: 1, URL: "https://securityaffairs.com/a", FullContent: "Clean body."},
