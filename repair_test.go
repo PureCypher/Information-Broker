@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"flag"
+	"testing"
+)
 
 func TestSelectRepairCandidatesOnlyContaminated(t *testing.T) {
 	// Default scope: only rows whose stored content contains an
@@ -44,5 +47,40 @@ func TestSelectRepairCandidatesLimit(t *testing.T) {
 	got := selectRepairCandidates(rows, false, 5)
 	if len(got) != 5 || got[0].ID != 1 || got[4].ID != 5 {
 		t.Fatalf("limit must cap batch size preserving id order, got %+v", got)
+	}
+}
+
+func TestSelectRepairCandidatesCaseInsensitiveMarkers(t *testing.T) {
+	// Real-world: securityaffairs stores the widget heading in title case
+	// ("You Might Also Like"), so case-sensitive matching missed 1378 of
+	// the 1380 contaminated rows. Matching must be case-insensitive.
+	rows := []repairRow{
+		{ID: 1, URL: "https://securityaffairs.com/a", FullContent: "Body. You Might Also Like X."},
+		{ID: 2, URL: "https://securityaffairs.com/b", FullContent: "Body. RECENT ARTICLES Y."},
+		{ID: 3, URL: "https://securityaffairs.com/c", FullContent: "Body. WE USE COOKIES on our website."},
+		{ID: 4, URL: "https://securityaffairs.com/d", FullContent: "Clean body."},
+	}
+	got := selectRepairCandidates(rows, false, 0)
+	if len(got) != 3 {
+		t.Fatalf("expected 3 case-insensitive matches, got %d: %+v", len(got), got)
+	}
+}
+
+func TestParseRepairArgsFlagsAfterPositional(t *testing.T) {
+	// Go's flag package stops at the first positional argument, so
+	// `repair securityaffairs.com --dry-run` silently ignored the flag and
+	// ran for real. Flags must be honoured wherever they appear.
+	fs := flag.NewFlagSet("repair", flag.ContinueOnError)
+	limit := fs.Int("limit", 0, "")
+	dryRun := fs.Bool("dry-run", false, "")
+	all := fs.Bool("all", false, "")
+	if err := parseRepairArgs(fs, []string{"securityaffairs.com", "--dry-run", "--limit", "5"}); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !*dryRun || *limit != 5 || *all {
+		t.Fatalf("flags ignored: dryRun=%v limit=%d all=%v", *dryRun, *limit, *all)
+	}
+	if fs.NArg() != 1 || fs.Arg(0) != "securityaffairs.com" {
+		t.Fatalf("positional args wrong: %v", fs.Args())
 	}
 }

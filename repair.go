@@ -32,16 +32,18 @@ type repairRow struct {
 }
 
 // selectRepairCandidates filters rows for a repair run: contaminated rows
-// (content containing a boilerplate marker), or every row with --all.
+// (content containing a boilerplate marker, case-insensitively — publishers
+// render widget headings in arbitrary casing), or every row with --all.
 // Order is stable by ID, and limit>0 caps the batch (0 = no cap), so runs
 // are bounded and safe to rerun.
 func selectRepairCandidates(rows []repairRow, all bool, limit int) []repairRow {
 	out := make([]repairRow, 0, len(rows))
 	for _, r := range rows {
 		if !all {
+			lower := strings.ToLower(r.FullContent)
 			contaminated := false
 			for _, m := range repairBoilerplateMarkers {
-				if strings.Contains(r.FullContent, m) {
+				if strings.Contains(lower, strings.ToLower(m)) {
 					contaminated = true
 					break
 				}
@@ -56,6 +58,37 @@ func selectRepairCandidates(rows []repairRow, all bool, limit int) []repairRow {
 		}
 	}
 	return out
+}
+
+// parseRepairArgs makes flags work wherever they appear: Go's flag package
+// stops parsing at the first positional argument, so `repair <pattern>
+// --dry-run` would otherwise ignore --dry-run and run for real. Flag-like
+// tokens (and their values) are moved ahead of positional tokens.
+func parseRepairArgs(fs *flag.FlagSet, args []string) error {
+	flagSet := map[string]bool{
+		"limit": true, "dry-run": true, "all": true,
+	}
+	flags, positional := make([]string, 0, len(args)), make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if strings.HasPrefix(a, "-") && strings.TrimLeft(a, "-") != "" {
+			name := strings.TrimLeft(a, "-")
+			if eq := strings.Index(name, "="); eq >= 0 {
+				flags = append(flags, a)
+				continue
+			}
+			flags = append(flags, a)
+			if flagSet[name] && i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				// boolean flags are consumed without a value only when
+				// declared bool; limit takes a value — pass it through.
+				flags = append(flags, args[i+1])
+				i++
+			}
+			continue
+		}
+		positional = append(positional, a)
+	}
+	return fs.Parse(append(flags, positional...))
 }
 
 // runRepair re-fetches stored articles matching pattern, re-extracts them
@@ -75,7 +108,7 @@ func runRepair(db *sql.DB, cfg *config.Config, args []string) error {
 	limit := fs.Int("limit", 0, "max rows to process in this run (0 = all selected)")
 	dryRun := fs.Bool("dry-run", false, "list what would be re-fetched and exit")
 	all := fs.Bool("all", false, "re-extract every matching row, not just contaminated ones")
-	if err := fs.Parse(args); err != nil {
+	if err := parseRepairArgs(fs, args); err != nil {
 		return err
 	}
 	if fs.NArg() < 1 {
