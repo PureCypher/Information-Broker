@@ -40,9 +40,10 @@ func runBackfill(db *sql.DB, cfg *config.Config, pattern string) error {
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	maxLen := cfg.Performance.MaxArticleContentLength
+	maxHTMLLen := cfg.Performance.MaxArticleHTMLLength
 	updated, skipped, failed := 0, 0, 0
 	for i, it := range items {
-		content, err := backfillFetch(client, cfg.API.UserAgent, it.url, maxLen)
+		content, contentHTML, err := backfillFetch(client, cfg.API.UserAgent, it.url, maxLen, maxHTMLLen)
 		if err != nil {
 			log.Printf("  [%d/%d] id=%d FAIL: %v", i+1, len(items), it.id, err)
 			failed++
@@ -55,8 +56,8 @@ func runBackfill(db *sql.DB, cfg *config.Config, pattern string) error {
 			time.Sleep(2 * time.Second)
 			continue
 		}
-		if _, err := db.Exec(`UPDATE articles SET full_content=$1, summary=NULL, updated_at=NOW() WHERE id=$2`,
-			sanitizeUTF8(content), it.id); err != nil {
+		if _, err := db.Exec(`UPDATE articles SET full_content=$1, content_html=$2, summary=NULL, updated_at=NOW() WHERE id=$3`,
+			sanitizeUTF8(content), contentHTML, it.id); err != nil {
 			log.Printf("  id=%d UPDATE FAIL: %v", it.id, err)
 			failed++
 			continue
@@ -71,28 +72,33 @@ func runBackfill(db *sql.DB, cfg *config.Config, pattern string) error {
 	return nil
 }
 
-func backfillFetch(client *http.Client, ua, url string, maxLen int) (string, error) {
+func backfillFetch(client *http.Client, ua, url string, maxLen, maxHTMLLen int) (string, string, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	req.Header.Set("User-Agent", ua)
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
+		return "", "", fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	text, _ := extractMainContent(doc)
+	text, bodyHTML := extractMainContent(doc)
 	content := strings.TrimSpace(text)
 	if len(content) > maxLen {
 		content = safeTruncate(content, maxLen) + "..."
 	}
-	return content, nil
+	if len(bodyHTML) > maxHTMLLen {
+		// A byte cut may split a tag or attribute; the frontend's parser
+		// tolerates truncated markup (unbalanced tags are auto-closed).
+		bodyHTML = safeTruncate(bodyHTML, maxHTMLLen)
+	}
+	return content, bodyHTML, nil
 }
