@@ -81,17 +81,46 @@ func loadRequeueArticles(db *sql.DB, since time.Time) ([]requeueArticle, error) 
 
 // loadMissingSummaryArticles selects already-posted articles whose summary is
 // NULL: exactly the rows the 'repair' command reset after re-extracting stale
-// content. Filtering on posted_to_discord keeps this loader disjoint from the
-// regular path (pending articles are unposted), so the two modes never
-// double-summarize the same article.
+// content. Keeping the posted filter here preserves the original contract; the
+// two modes stay disjoint by the summary predicates alone (NULL vs the literal
+// failure marker), which is also what keeps the regular path (pending,
+// unposted rows) from double-summarizing the same article.
 func loadMissingSummaryArticles(db *sql.DB) ([]requeueArticle, error) {
-	rows, err := db.Query(`
+	return loadCatchupArticles(db, "summary IS NULL AND posted_to_discord")
+}
+
+// failedSummaryMinContent is the smallest article body worth summarizing.
+// Machine-generated CVE stubs store 40-100 character descriptions; condensing
+// those would just restate the title, and since summarization of them keeps
+// failing they would be re-selected by every run. Rows below the floor stay in
+// the honest 'summary unavailable' state.
+const failedSummaryMinContent = 300
+
+// loadFailedSummaryArticles selects articles whose summary is the literal
+// 'summary unavailable' marker the scheduler writes on failure: rows that
+// failed during an outage (e.g. Ollama unreachable) but are summarizable now.
+// Posted state is intentionally NOT filtered: rows that failed before the
+// Discord post step are stranded — the live monitor never retries failed rows,
+// so without this catch-up they never get a summary. Disjoint from both other
+// modes by the summary predicate; see failedSummaryMinContent for the floor.
+func loadFailedSummaryArticles(db *sql.DB) ([]requeueArticle, error) {
+	return loadCatchupArticles(db, fmt.Sprintf(
+		"summary = 'summary unavailable' AND length(COALESCE(full_content, '')) >= %d", failedSummaryMinContent))
+}
+
+// loadCatchupArticles is the shared catch-up query: content-bearing,
+// publish-dated rows matching the given summary predicate, newest repair
+// activity first (updated_at DESC — rows a repair just re-extracted regenerate
+// first). Posted-state filtering belongs in the caller's predicate.
+func loadCatchupArticles(db *sql.DB, summaryPredicate string) ([]requeueArticle, error) {
+	query := `
 		SELECT url, title, COALESCE(full_content, ''), COALESCE(feed_url, ''), publish_date
 		FROM articles
-		WHERE summary IS NULL AND posted_to_discord AND COALESCE(full_content, '') <> '' AND publish_date IS NOT NULL
-		ORDER BY updated_at DESC`)
+		WHERE ` + summaryPredicate + ` AND COALESCE(full_content, '') <> '' AND publish_date IS NOT NULL
+		ORDER BY updated_at DESC`
+	rows, err := db.Query(query)
 	if err != nil {
-		return nil, fmt.Errorf("select missing-summary: %w", err)
+		return nil, fmt.Errorf("select: %w", err)
 	}
 	defer rows.Close()
 
@@ -131,27 +160,43 @@ func capCandidates(in []requeueArticle, limit int) []requeueArticle {
 // --missing-summary selects a disjoint set: already-posted articles whose summary is NULL — the
 // rows 'repair' reset after re-extracting stale content. It never touches Discord (webhooks are
 // stripped) and never re-marks posted; a regenerated summary alone clears the row from future
-// selections. --limit bounds the batch in either mode.
+// selections.
+//
+// --failed-summaries rescues articles whose summary is the 'summary unavailable' failure marker,
+// regardless of posted state: rows that failed before the Discord post step are stranded (the live
+// monitor never retries failed rows). It never sends to Discord (webhooks are stripped) and marks
+// each rescued row posted, so a later default-mode catch-up can't post months-old news. Summaries
+// need real article text, so bodies under failedSummaryMinContent chars are left failed. All three
+// modes stay disjoint by summary predicate. --limit bounds the batch in any mode.
 func runRequeue(db *sql.DB, cfg *config.Config, args []string) error {
 	fs := flag.NewFlagSet("requeue", flag.ContinueOnError)
 	window := fs.Duration("since", 48*time.Hour, "only articles stored within this window")
 	dryRun := fs.Bool("dry-run", false, "list what would be requeued and exit")
 	skipPost := fs.Bool("skip-post", false, "summarize and mark as posted without sending to Discord")
 	missingSummary := fs.Bool("missing-summary", false, "requeue already-posted articles whose summary is NULL (e.g. after 'repair' reset it); never posts to Discord")
+	failedSummaries := fs.Bool("failed-summaries", false, "requeue articles whose summary is the 'summary unavailable' failure marker (e.g. after an outage); never sends to Discord, marks rescued rows posted")
 	limit := fs.Int("limit", 0, "max articles to requeue in this run (0 = all)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
 	var candidates []requeueArticle
-	if *missingSummary {
+	switch {
+	case *missingSummary:
 		stored, err := loadMissingSummaryArticles(db)
 		if err != nil {
 			return err
 		}
 		candidates = capCandidates(selectRequeueCandidates(stored, cfg.Discord.IsFeedExcluded, cfg.App.ArticleCutoffDate), *limit)
 		log.Printf("requeue: %d posted articles with summary NULL, %d eligible", len(stored), len(candidates))
-	} else {
+	case *failedSummaries:
+		stored, err := loadFailedSummaryArticles(db)
+		if err != nil {
+			return err
+		}
+		candidates = capCandidates(selectRequeueCandidates(stored, cfg.Discord.IsFeedExcluded, cfg.App.ArticleCutoffDate), *limit)
+		log.Printf("requeue: %d articles with 'summary unavailable' and %d+ chars, %d eligible", len(stored), failedSummaryMinContent, len(candidates))
+	default:
 		stored, err := loadRequeueArticles(db, time.Now().Add(-*window))
 		if err != nil {
 			return err
@@ -170,10 +215,12 @@ func runRequeue(db *sql.DB, cfg *config.Config, args []string) error {
 	}
 
 	runCfg := *cfg
-	if *skipPost || *missingSummary {
+	if *skipPost || *missingSummary || *failedSummaries {
 		runCfg.Discord = withoutWebhooks(cfg.Discord)
 		if *missingSummary {
 			log.Printf("requeue: --missing-summary set, nothing will be sent to Discord")
+		} else if *failedSummaries {
+			log.Printf("requeue: --failed-summaries set, nothing will be sent to Discord")
 		} else {
 			log.Printf("requeue: --skip-post set, nothing will be sent to Discord")
 		}
@@ -208,7 +255,12 @@ func runRequeue(db *sql.DB, cfg *config.Config, args []string) error {
 			}
 			continue
 		}
-		if *skipPost {
+		if *skipPost || *failedSummaries {
+			// --failed-summaries never sends to Discord, but unposted rows it
+			// rescues must still leave the stranded pool: left unposted, a
+			// later default-mode catch-up run would pick them up and post
+			// months-old news. markPosted records them as settled without
+			// sending anything.
 			if err := markPosted(db, a.URL); err != nil {
 				return fmt.Errorf("mark %q posted: %w", a.Title, err)
 			}
@@ -221,7 +273,8 @@ func runRequeue(db *sql.DB, cfg *config.Config, args []string) error {
 	}
 
 	// The worker posts to Discord in a goroutine after returning the summary; let the last ones finish.
-	if !*skipPost {
+	// Catch-up modes never post, so there is nothing to settle.
+	if !(*skipPost || *missingSummary || *failedSummaries) {
 		time.Sleep(cfg.Discord.Timeout + requeueDiscordSettling)
 	}
 	log.Printf("requeue done: summarized=%d failed=%d (total %d)", succeeded, failed, len(candidates))
