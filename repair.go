@@ -22,6 +22,8 @@ var repairBoilerplateMarkers = []string{
 	"You might also like", // securityaffairs.com related-posts heading
 	"Recent Articles",     // securityaffairs.com recent-widget heading
 	"We use cookies",      // cookie-consent banners (securityaffairs, many WP sites)
+	"Share this article",  // techradar.com 2026 share rail (also rapid7, elastic, intel471)
+	"Read more:",          // techrepublic/zdnet/therecord/helpnetsecurity read-more widgets
 }
 
 type repairRow struct {

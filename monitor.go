@@ -687,6 +687,20 @@ func extractMainContent(doc *goquery.Document) (text, bodyHTML string) {
 	// strip them so ad-slot labels don't pollute the extracted article text.
 	doc.Find(".ad-label").Remove()
 
+	// Future plc sites (techradar.com et al.) tag their page widgets with
+	// data-component-name="..."; the article prose sits directly inside
+	// <article>. The share/follow rail, video carousel, "more from" link
+	// rivers, author bio, comment thread and sponsored promos are all inside
+	// the <article> node, so the <article> match otherwise sweeps them in
+	// around the real body (2026-10 techradar template).
+	doc.Find(`[data-component-name="UtilityBar"], ` +
+		`[data-component-name="JwPlayer:Carousel"], ` +
+		`[data-component-name="Recirculation:ArticleRiver"], ` +
+		`[data-component-name="Slice:AuthorBio"], ` +
+		`[data-component-name="Viafora:Comments"], ` +
+		`[data-component-name="Slice:PopularBox"], ` +
+		`[data-component-name="SponsoredScroll"]`).Remove()
+
 	// Precise, high-confidence article-body selectors. Within this tier the
 	// longest match wins (a real post body dwarfs a related-post teaser card;
 	// this is the hackread.com fix). ".k5a-article" is theregister.com's

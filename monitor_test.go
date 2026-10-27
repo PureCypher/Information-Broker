@@ -288,3 +288,53 @@ func TestExtractMainContentSecurityAffairsArticleDetailsBlock(t *testing.T) {
 		t.Fatalf("expected the .article-details-block body, got: %.200q", got)
 	}
 }
+
+func TestExtractMainContentTechradarFuturePlcWidgets(t *testing.T) {
+	// Real-world case found live on techradar.com (2026 template, article
+	// id 90215): the prose paragraphs sit directly inside <article>, which
+	// also contains the share/follow rail (#utility-bar), a video carousel,
+	// "more from" link rivers, the author bio and comment embeds — all
+	// tagged data-component-name="...". The <article> match swept them in:
+	// the stored content opened with the share rail ("Share this article",
+	// "Join the conversation", "Follow us") and ended with the author bio,
+	// and the summary generated from it described newsletter subscriptions.
+	// Widgets are stripped before selector ranking so <article> is clean.
+	prose := strings.Repeat("Microsoft has confirmed it recently fixed its highest ever vulnerability in ASP.NET Core. ", 10)
+	html := `<html><body>
+		<nav><a href="/features">Features</a> <a href="/reviews">Reviews</a></nav>
+		<article>
+			<div id="article-body" class="text-copy bodyCopy auto">
+				<div data-analytics-id="utility-bar" data-component-name="UtilityBar" class="flex justify-between">
+					<button id="utilitybar__button--share" aria-label="Share this article">Share this article</button>
+					<a class="button-social" href="https://twitter.com/techradar" aria-label="Follow us">Follow us</a>
+				</div>
+				<p>` + prose + `</p>
+				<div class="my-6 w-full" data-component-name="JwPlayer:Carousel">
+					<div data-jwp-carousel-header="">Latest Videos From <span class="jwp-carousel-brand">TechRadar</span></div>
+				</div>
+			</div>
+			<div data-component-name="Recirculation:ArticleRiver">
+				<a href="/pro/best-vpn">Best VPNs</a> <a href="/pro/best-antivirus">Best antivirus</a>
+			</div>
+			<div data-component-name="Slice:AuthorBio">
+				<div class="author__social">Sead is a seasoned freelance journalist based in Sarajevo.</div>
+			</div>
+			<div data-component-name="Viafora:Comments">Join the conversation</div>
+		</article>
+	</body></html>`
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	got, _ := extractMainContent(doc)
+	for _, junk := range []string{"Share this article", "Follow us", "Join the conversation", "Latest Videos From", "Best VPNs", "freelance journalist", "Features", "Reviews"} {
+		if strings.Contains(got, junk) {
+			t.Fatalf("widget chrome %q leaked into extracted content: %.300q", junk, got)
+		}
+	}
+	if !strings.Contains(got, "highest ever vulnerability in ASP.NET Core") {
+		t.Fatalf("expected the article prose, got: %.300q", got)
+	}
+}
