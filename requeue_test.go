@@ -65,3 +65,28 @@ func TestWithoutWebhooksDisablesPostingWithoutMutatingTheOriginal(t *testing.T) 
 		t.Fatalf("original must be untouched: %+v", original)
 	}
 }
+
+func TestCapCandidatesBoundsBatchAndKeepsOrder(t *testing.T) {
+	// Real-world use: 'repair' resets summaries in bounded batches and the
+	// summarizer must catch up the same way — a run must be bounded by
+	// --limit, keep the priority order, and pass through unchanged when the
+	// batch is smaller than the limit or the limit is zero.
+	in := []requeueArticle{
+		{URL: "https://a.example/1", Title: "newest"},
+		{URL: "https://a.example/2", Title: "middle"},
+		{URL: "https://a.example/3", Title: "oldest"},
+	}
+	if got := capCandidates(in, 2); len(got) != 2 || got[0].URL != in[0].URL || got[1].URL != in[1].URL {
+		t.Fatalf("limit 2 should keep the first two in order, got %+v", got)
+	}
+	if got := capCandidates(in, 10); len(got) != 3 {
+		t.Fatalf("limit above batch size should keep everything, got %+v", got)
+	}
+	if got := capCandidates(in, 0); len(got) != 3 {
+		t.Fatalf("limit 0 means unbounded, got %+v", got)
+	}
+	// The original slice must be untouched (the input can be reused by callers).
+	if len(in) != 3 || in[0].URL != "https://a.example/1" {
+		t.Fatalf("capCandidates must not mutate its input: %+v", in)
+	}
+}

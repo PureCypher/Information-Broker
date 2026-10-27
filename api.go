@@ -86,11 +86,11 @@ func (s *APIServer) Start() {
 
 // ArticleView is the JSON representation of an article returned by the API.
 type ArticleView struct {
-	ID             int64         `json:"id"`
-	Title          string        `json:"title"`
-	URL            string        `json:"url"`
-	Summary        *string       `json:"summary"`
-	Content        string        `json:"content"`
+	ID      int64   `json:"id"`
+	Title   string  `json:"title"`
+	URL     string  `json:"url"`
+	Summary *string `json:"summary"`
+	Content string  `json:"content"`
 	// ContentHTML is the structured article body (original headings, lists,
 	// images) when the source page provided one. Pointer + omitempty: absent
 	// on list/latest responses (which don't select the column) and on older

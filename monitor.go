@@ -27,10 +27,10 @@ import (
 
 // Article represents a fetched article with all required information
 type Article struct {
-	Title         string        `json:"title"`
-	URL           string        `json:"url"`
-	PublishedAt   time.Time     `json:"published_at"`
-	Content       string        `json:"content"`
+	Title       string    `json:"title"`
+	URL         string    `json:"url"`
+	PublishedAt time.Time `json:"published_at"`
+	Content     string    `json:"content"`
 	// ContentHTML is the extracted article body with its original structure
 	// (headings, lists, images) when the source provides HTML. Empty for
 	// plain-text sources. Not used for hashing, search, or summarisation —
@@ -762,9 +762,9 @@ func extractMainContent(doc *goquery.Document) (text, bodyHTML string) {
 	// duplicate the title and byline the reading page already renders.
 	// Strip those subtrees after selection; ranking above already happened
 	// on the full text, so this only trims the stored copy.
-	best.Find("header, nav, footer, aside, form, button, "+
-		"[x-show], [x-cloak], [hidden], [aria-hidden='true'], "+
-		"[role='toolbar'], [role='menu'], [role='menubar'], [role='navigation'], "+
+	best.Find("header, nav, footer, aside, form, button, " +
+		"[x-show], [x-cloak], [hidden], [aria-hidden='true'], " +
+		"[role='toolbar'], [role='menu'], [role='menubar'], [role='navigation'], " +
 		".social-share, .share-buttons, .sharing-links").Remove()
 
 	text = strings.TrimSpace(best.Text())
