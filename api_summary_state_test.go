@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -13,18 +15,21 @@ func TestSummaryStateOf(t *testing.T) {
 	cases := []struct {
 		name    string
 		summary *string
+		content string
 		want    string
 	}{
-		{"nil summary is pending", nil, "pending"},
-		{"empty-string summary is available (summarizer never writes empty)", ptr(""), "available"},
-		{"fallback literal is failed", &unavailable, "failed"},
-		{"fallback literal case-insensitive", &upper, "failed"},
-		{"fallback literal with padding", &padded, "failed"},
-		{"real summary is available", &content, "available"},
+		{"nil summary with content is pending", nil, "Real article text.", "pending"},
+		{"nil summary without content is unavailable (nothing can summarize it)", nil, "", "unavailable"},
+		{"nil summary with whitespace content is unavailable", nil, "  \n\t ", "unavailable"},
+		{"empty-string summary is available (summarizer never writes empty)", ptr(""), "", "available"},
+		{"fallback literal is failed", &unavailable, "", "failed"},
+		{"fallback literal case-insensitive", &upper, "", "failed"},
+		{"fallback literal with padding", &padded, "", "failed"},
+		{"real summary is available", &content, "", "available"},
 	}
 	for _, c := range cases {
-		if got := summaryStateOf(c.summary); got != c.want {
-			t.Errorf("%s: summaryStateOf(%v) = %q, want %q", c.name, c.summary, got, c.want)
+		if got := summaryStateOf(c.summary, c.content); got != c.want {
+			t.Errorf("%s: summaryStateOf(%v, %q) = %q, want %q", c.name, c.summary, c.content, got, c.want)
 		}
 	}
 }
@@ -61,6 +66,34 @@ func TestBuildArticlesWhereMatchesQuery(t *testing.T) {
 		}
 		if nextIdx != c.wantArgs+1 {
 			t.Errorf("%s: nextIdx = %d, want %d", c.name, nextIdx, c.wantArgs+1)
+		}
+	}
+}
+
+// TestArticleStatesBothRepos: the SmellyFeet frontend must show the same state
+// this API decides for an article; a shared Go-side contract test guards it.
+func TestArticleStatesBothRepos(t *testing.T) {
+	if _, err := os.Stat("../../SmellyFeet/internal/server/templates/article.html"); err != nil {
+		t.Skip("frontend repo not checked out next to backend")
+	}
+	// The backend's summary_state vocabulary: "available" is the default
+	// branch (a summary renders directly), the rest are explicit template
+	// branches. Every non-default state the backend can emit must have a
+	// branch in BOTH templates, or the UI lies about it.
+	wantStates := []string{"pending", "failed", "unavailable"}
+	for _, tmpl := range []string{"article.html", "list.html"} {
+		raw, err := os.ReadFile("../../SmellyFeet/internal/server/templates/" + tmpl)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]bool{}
+		for _, m := range regexp.MustCompile(`eq \.SummaryState "(\w+)"`).FindAllStringSubmatch(string(raw), -1) {
+			got[m[1]] = true
+		}
+		for _, want := range wantStates {
+			if !got[want] {
+				t.Errorf("%s: no branch for summary_state %q (has %v) — frontend would misrender it", tmpl, want, got)
+			}
 		}
 	}
 }

@@ -164,11 +164,18 @@ func buildArticlesQuery(feed, q, sort string, limit, offset int) (string, []inte
 
 // summaryStateOf maps a stored summary to the public summary_state. The
 // summarizer persists the literal "summary unavailable" when retries are
-// exhausted (summarizer.go:246); NULL means summarization hasn't reached the
-// article yet, so "pending" is honest — it is genuinely queued work.
-func summaryStateOf(summary *string) string {
+// exhausted (summarizer.go:246). NULL plus stored article text means
+// summarization hasn't reached the article yet — "pending" (the requeue
+// catch-up command and the normal pipeline both pick such rows up). NULL with
+// no stored text can never be summarized, so it is "unavailable", not
+// "pending": the reading page must not promise queued work that doesn't
+// exist.
+func summaryStateOf(summary *string, content string) string {
 	switch {
 	case summary == nil:
+		if strings.TrimSpace(content) == "" {
+			return "unavailable"
+		}
 		return "pending"
 	case strings.EqualFold(strings.TrimSpace(*summary), "summary unavailable"):
 		return "failed"
@@ -250,7 +257,7 @@ func (s *APIServer) getArticles(w http.ResponseWriter, r *http.Request) {
 		}
 
 		article.FetchDuration = time.Duration(fetchDurationMs) * time.Millisecond
-		article.SummaryState = summaryStateOf(article.Summary)
+		article.SummaryState = summaryStateOf(article.Summary, article.Content)
 		articles = append(articles, article)
 	}
 
@@ -331,7 +338,7 @@ func (s *APIServer) getArticleByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	article.FetchDuration = time.Duration(fetchDurationMs) * time.Millisecond
-	article.SummaryState = summaryStateOf(article.Summary)
+	article.SummaryState = summaryStateOf(article.Summary, article.Content)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(article)
@@ -388,7 +395,7 @@ func (s *APIServer) getLatestArticles(w http.ResponseWriter, r *http.Request) {
 		}
 
 		article.FetchDuration = time.Duration(fetchDurationMs) * time.Millisecond
-		article.SummaryState = summaryStateOf(article.Summary)
+		article.SummaryState = summaryStateOf(article.Summary, article.Content)
 		articles = append(articles, article)
 	}
 
