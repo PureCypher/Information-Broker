@@ -39,6 +39,21 @@ func main() {
 		return
 	}
 
+	// One-off maintenance: `information-broker repair <url-substring> [--limit N] [--dry-run] [--all]`
+	// re-extracts articles with the current extractor, updating only rows whose
+	// content actually changed (summary queued for regeneration on those).
+	if len(os.Args) > 1 && os.Args[1] == "repair" {
+		db, err := initDatabase(cfg)
+		if err != nil {
+			log.Fatalf("repair: db: %v", err)
+		}
+		defer db.Close()
+		if err := runRepair(db, cfg, os.Args[2:]); err != nil {
+			log.Fatalf("repair: %v", err)
+		}
+		return
+	}
+
 	// One-off maintenance: `information-broker requeue [--since 48h] [--dry-run]` pushes stored but
 	// unposted articles back through the summarization worker (catch-up after a summarizer outage).
 	if len(os.Args) > 1 && os.Args[1] == "requeue" {
