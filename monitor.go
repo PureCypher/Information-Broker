@@ -464,10 +464,24 @@ func (m *RSSMonitor) processArticle(item *gofeed.Item, feedURL string) bool {
 	var publishDate time.Time
 	if item.PublishedParsed != nil {
 		publishDate = item.PublishedParsed.UTC()
+		// Some feeds (e.g. Dark Reading event promos) stamp the future event date
+		// as the pubDate. That would let ads outrank real news on a publish_date
+		// sort, so anything more than 24h in the future is treated as published now.
+		if clamped := clampFuturePublishDate(publishDate, time.Now().UTC()); clamped != publishDate {
+			log.Printf("Clamping future-dated publish (%s) to now for: %s", publishDate.Format(time.RFC3339), item.Title)
+			publishDate = clamped
+		}
 	} else {
 		// If no publish date is available, skip the article as per requirements
 		log.Printf("Skipping article with missing publish date: %s", item.Title)
 		m.metrics.RecordArticleProcessed(feedURL, "skipped_no_publish_date")
+		return false
+	}
+
+	// Skip rejected/reserved CVE entries — cvefeed.io (and similar CVE feeds) publish
+	// "Rejected reason: …" items that carry no usable intelligence and flood the feed.
+	if isRejectedCVE(item.Title) {
+		m.metrics.RecordArticleProcessed(feedURL, "skipped_rejected_cve")
 		return false
 	}
 
@@ -500,16 +514,29 @@ func (m *RSSMonitor) processArticle(item *gofeed.Item, feedURL string) bool {
 	m.seenArticles[item.Link] = true
 	m.mutex.Unlock()
 
-	// Fetch full content with context for graceful shutdown
-	fetchCtx, fetchCancel := context.WithTimeout(context.Background(), m.config.API.Timeout)
-	defer fetchCancel()
-	startTime := time.Now()
-	content, err := m.fetchFullContent(fetchCtx, item.Link)
-	fetchDuration := time.Since(startTime)
+	var content string
+	var fetchDuration time.Duration
 
-	if err != nil {
-		log.Printf("Failed to fetch content for %s: %v", item.Link, err)
-		content = item.Description // Fallback to description
+	// cvefeed.io's RSS description already carries the structured vulnerability
+	// summary (CVE ID, description, severity); the live page is a Bootstrap
+	// admin dashboard whose scraped text is nav/scoring-table chrome. Prefer
+	// the feed's own description and skip the page fetch entirely.
+	if strings.Contains(item.Link, "cvefeed.io") {
+		content = cleanCvefeedDescription(item.Description)
+		m.metrics.RecordArticleProcessed(feedURL, "used_feed_description")
+	} else {
+		// Fetch full content with context for graceful shutdown
+		fetchCtx, fetchCancel := context.WithTimeout(context.Background(), m.config.API.Timeout)
+		defer fetchCancel()
+		startTime := time.Now()
+		var err error
+		content, err = m.fetchFullContent(fetchCtx, item.Link)
+		fetchDuration = time.Since(startTime)
+
+		if err != nil {
+			log.Printf("Failed to fetch content for %s: %v", item.Link, err)
+			content = item.Description // Fallback to description
+		}
 	}
 
 	// Create article struct
@@ -761,4 +788,64 @@ func (m *RSSMonitor) updateArticleSummary(articleURL, summary string) error {
 	query := `UPDATE articles SET summary = $1, updated_at = NOW() WHERE url = $2`
 	_, err := m.db.Exec(query, summary, articleURL)
 	return err
+}
+
+// clampFuturePublishDate treats anything more than 24h in the future as
+// published now: some feeds stamp the future event date as the pubDate, which
+// would let event promos outrank real news on a publish_date sort.
+func clampFuturePublishDate(publishDate, now time.Time) time.Time {
+	if publishDate.After(now.Add(24 * time.Hour)) {
+		return now
+	}
+	return publishDate
+}
+
+// isRejectedCVE reports whether an item title marks a rejected/reserved CVE
+// record (e.g. cvefeed.io items titled "CVE-… - Rejected reason: …"). These
+// entries describe the CVE identifier's status, not a vulnerability, and are
+// not worth storing or summarizing.
+func isRejectedCVE(title string) bool {
+	t := strings.TrimSpace(title)
+	if t == "" {
+		return false
+	}
+	lower := strings.ToLower(t)
+	if !strings.HasPrefix(lower, "cve-") {
+		return false
+	}
+	return strings.Contains(lower, "rejected reason") || strings.Contains(lower, "reserved")
+}
+
+// cleanCvefeedDescription converts cvefeed.io's structured RSS description
+// (HTML-escaped <strong>label</strong> text with <br /> separators) into
+// plain, readable text: labels become "Label:" prefixes, breaks become
+// newlines, and any residual HTML tags are stripped.
+func cleanCvefeedDescription(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	s := raw
+	// gofeed already decodes entities; tolerate both decoded and still-encoded forms.
+	s = strings.ReplaceAll(s, "&lt;", "<")
+	s = strings.ReplaceAll(s, "&gt;", ">")
+	s = strings.ReplaceAll(s, "&amp;", "&")
+	// <br /> variants → newline
+	for _, br := range []string{"<br />", "<br/>", "<br>"} {
+		s = strings.ReplaceAll(s, br, "\n")
+	}
+	// Drop block-level tags; keep strong/i/em text inline.
+	for _, tag := range []string{"</strong>", "<strong>", "</b>", "<b>", "</i>", "<i>", "</em>", "<em>", "</p>", "<p>"} {
+		s = strings.ReplaceAll(s, tag, "")
+	}
+	// Drop empty lines entirely (indentation between <br /> tags produces
+	// stray blanks; keep only content lines separated by single newlines).
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
 }

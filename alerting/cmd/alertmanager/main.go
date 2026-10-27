@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -81,6 +82,7 @@ type PrometheusResponse struct {
 // AlertManager manages alerting rules and notifications
 type AlertManager struct {
 	config       Config
+	mu           sync.RWMutex
 	activeAlerts map[string]*Alert
 	httpClient   *http.Client
 }
@@ -242,6 +244,7 @@ func (am *AlertManager) evaluateRule(rule AlertRule) {
 		}
 
 		alertKey := rule.Name
+		am.mu.Lock()
 		if shouldAlert {
 			if _, exists := am.activeAlerts[alertKey]; !exists {
 				// New alert
@@ -256,8 +259,11 @@ func (am *AlertManager) evaluateRule(rule AlertRule) {
 					StartsAt:    time.Now(),
 				}
 				am.activeAlerts[alertKey] = alert
+				am.mu.Unlock()
 				am.sendAlert(alert)
 				log.Printf("Alert fired: %s (value: %f, threshold: %f)", rule.Name, numValue, rule.Threshold)
+			} else {
+				am.mu.Unlock()
 			}
 		} else {
 			if alert, exists := am.activeAlerts[alertKey]; exists {
@@ -265,9 +271,12 @@ func (am *AlertManager) evaluateRule(rule AlertRule) {
 				now := time.Now()
 				alert.EndsAt = &now
 				alert.Status = "resolved"
-				am.sendAlert(alert)
 				delete(am.activeAlerts, alertKey)
+				am.mu.Unlock()
+				am.sendAlert(alert)
 				log.Printf("Alert resolved: %s", rule.Name)
+			} else {
+				am.mu.Unlock()
 			}
 		}
 	}
@@ -365,10 +374,12 @@ func (am *AlertManager) healthHandler(w http.ResponseWriter, r *http.Request) {
 func (am *AlertManager) alertsHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
+	am.mu.RLock()
 	alerts := make([]*Alert, 0, len(am.activeAlerts))
 	for _, alert := range am.activeAlerts {
 		alerts = append(alerts, alert)
 	}
+	am.mu.RUnlock()
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"alerts": alerts,
@@ -378,8 +389,13 @@ func (am *AlertManager) alertsHandler(w http.ResponseWriter, r *http.Request) {
 
 func (am *AlertManager) statusHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+
+	am.mu.RLock()
+	alertCount := len(am.activeAlerts)
+	am.mu.RUnlock()
+
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"active_alerts": len(am.activeAlerts),
+		"active_alerts": alertCount,
 		"rules_count":   len(am.config.Rules),
 		"webhooks": map[string]bool{
 			"discord": am.config.Webhooks.Discord.Enabled,
