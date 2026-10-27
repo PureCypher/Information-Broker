@@ -30,7 +30,7 @@ func TestExtractMainContentPrefersLongestArticleMatch(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 
-	got, _ := extractMainContent(doc)
+	got, _ := extractMainContent(doc, "")
 	if strings.Contains(got, "Fake Interpol") {
 		t.Fatalf("extracted the wrong (short, unrelated) article teaser instead of the main article: %s", got)
 	}
@@ -56,7 +56,7 @@ func TestExtractMainContentPrefersLongerMatchFromLaterSelector(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 
-	got, _ := extractMainContent(doc)
+	got, _ := extractMainContent(doc, "")
 	if !strings.Contains(got, "real article body") {
 		t.Fatalf("expected the .entry-content text despite <article> matching first in priority order, got: %s", got)
 	}
@@ -81,7 +81,7 @@ func TestExtractMainContentStripsAudioPlayerWidget(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 
-	got, _ := extractMainContent(doc)
+	got, _ := extractMainContent(doc, "")
 	if strings.Contains(got, "Listen to this article") || strings.Contains(got, "Voice") {
 		t.Fatalf("audio-player widget text leaked into extracted content: %s", got)
 	}
@@ -108,7 +108,7 @@ func TestExtractMainContentStripsScriptAndStyleTags(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 
-	got, _ := extractMainContent(doc)
+	got, _ := extractMainContent(doc, "")
 	if strings.Contains(got, "margin:0") || strings.Contains(got, "console.log") {
 		t.Fatalf("script/style raw text leaked into extracted content: %s", got)
 	}
@@ -142,7 +142,7 @@ func TestExtractMainContentFindsPageContentWrapper(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 
-	got, _ := extractMainContent(doc)
+	got, _ := extractMainContent(doc, "")
 	if strings.Contains(got, "CVE ID, Product, Vendor") || strings.Contains(got, "Pricing") {
 		t.Fatalf("header/nav chrome leaked into extracted content: %s", got)
 	}
@@ -157,7 +157,7 @@ func TestExtractMainContentFallsBackToBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	got, _ := extractMainContent(doc)
+	got, _ := extractMainContent(doc, "")
 	if !strings.Contains(got, "Just some plain body text") {
 		t.Fatalf("expected body fallback text, got: %s", got)
 	}
@@ -188,7 +188,7 @@ func TestExtractMainContentTheRegisterK5aArticle(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 
-	got, _ := extractMainContent(doc)
+	got, _ := extractMainContent(doc, "")
 	if !strings.Contains(got, "GPT-5.6 has deleted users' files") {
 		t.Fatalf("did not extract the k5a-article body; got %d chars: %.120q", len(got), got)
 	}
@@ -219,7 +219,7 @@ func TestExtractMainContentStripsEmbeddedHeaderChrome(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 
-	text, bodyHTML := extractMainContent(doc)
+	text, bodyHTML := extractMainContent(doc, "")
 	for _, chrome := range []string{"Ransomware Group Weaponizes VPN Zero-Day", "By Jane Doe", "SECURITY"} {
 		if strings.Contains(text, chrome) {
 			t.Fatalf("text kept embedded-header chrome %q: %s", chrome, text[:min(200, len(text))])
@@ -271,7 +271,7 @@ func TestExtractMainContentSecurityAffairsArticleDetailsBlock(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 
-	got, _ := extractMainContent(doc)
+	got, _ := extractMainContent(doc, "")
 	if strings.Contains(got, "You might also like") || strings.Contains(got, "Fake Bank Calls") {
 		t.Fatalf("recommended-post widget leaked into extracted content: %.200q", got)
 	}
@@ -328,7 +328,7 @@ func TestExtractMainContentTechradarFuturePlcWidgets(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 
-	got, _ := extractMainContent(doc)
+	got, _ := extractMainContent(doc, "")
 	for _, junk := range []string{"Share this article", "Follow us", "Join the conversation", "Latest Videos From", "Best VPNs", "freelance journalist", "Features", "Reviews"} {
 		if strings.Contains(got, junk) {
 			t.Fatalf("widget chrome %q leaked into extracted content: %.300q", junk, got)
@@ -336,5 +336,75 @@ func TestExtractMainContentTechradarFuturePlcWidgets(t *testing.T) {
 	}
 	if !strings.Contains(got, "highest ever vulnerability in ASP.NET Core") {
 		t.Fatalf("expected the article prose, got: %.300q", got)
+	}
+}
+
+func TestExtractMainContentDropsDuplicateTitleH1(t *testing.T) {
+	// Real-world cases (2026-10): bleepingcomputer.com embeds the headline
+	// in a plain <div class="article_section"> — outside any <header> — so
+	// the header-chrome strip missed it and the stored body began with a
+	// second copy of the title plus the byline block; theregister.com's
+	// .k5a-article embeds <h1 class="headline">+subtitle the same way. A
+	// leading h1 whose text equals the article title is dropped; the
+	// subtitle paragraph (real editorial content) and genuine section h1s
+	// elsewhere must survive. Whitespace/newlines inside the publisher h1
+	// must not defeat the match.
+	prose := strings.Repeat("Researchers documented eleven flaws in Tailscale that allow root privileges. ", 8)
+	html := `<html><body>
+		<article>
+			<div class="article_section">
+				<h1>Tailscale warns of SSH flaws allowing root privilege escalation</h1>
+				<div class="cz-news-story-title-section">
+					By <h6><a href="/author/x" rel="author">Sergiu Gatlan</a></h6>
+					<ul><li>October 27, 2026</li></ul>
+				</div>
+				<div class="articleBody"><p>` + prose + `</p></div>
+			</div>
+		</article>
+	</body></html>`
+
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+	got, htmlOut := extractMainContent(doc, "Tailscale warns of SSH flaws allowing root privilege escalation")
+	if strings.Count(got, "Tailscale warns of SSH flaws") != 0 {
+		t.Fatalf("duplicate title survived in text: %.200q", got)
+	}
+	if strings.Contains(got, "Sergiu Gatlan") {
+		t.Fatalf("byline leaked into prose-only .articleBody: %.200q", got)
+	}
+	if !strings.Contains(got, "root privileges") {
+		t.Fatalf("prose missing: %.200q", got)
+	}
+	if strings.Contains(htmlOut, "<h1") {
+		t.Fatalf("duplicate title h1 survived in HTML: %.200q", htmlOut)
+	}
+}
+
+func TestExtractMainContentKeepsSubtitleAndGenuineH1(t *testing.T) {
+	// theregister.com: the h1.headline matches the RSS title and must be
+	// dropped, but its <p class="subtitle"> is real editorial content and a
+	// later h1 that is NOT the title must survive (the h1→h2 demotion and
+	// "keep the subtitle" behaviour of the reading page depend on it).
+	prose := strings.Repeat("Microsoft releases out-of-band Windows fixes with certificate updates. ", 8)
+	html := `<html><body>
+		<article class="k5a-article">
+			<h1 class="headline">
+				Microsoft releases out-of-band Windows fixes with certificate updates
+			</h1>
+			<p class="subtitle">Did you hear the one about eMudhra and the power of 4? Time to get certified.</p>
+			<p>` + prose + `</p>
+			<h1>Reader comment thread guidelines</h1>
+		</article>
+	</body></html>`
+
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+	got, htmlOut := extractMainContent(doc, "Microsoft releases out-of-band Windows fixes with certificate updates")
+	if strings.Count(htmlOut, "<h1") != 1 || !strings.Contains(htmlOut, "Reader comment thread guidelines") {
+		t.Fatalf("expected exactly the genuine h1 to survive: %.300q", htmlOut)
+	}
+	if !strings.Contains(got, "Did you hear the one about eMudhra") {
+		t.Fatalf("subtitle paragraph was dropped: %.200q", got)
+	}
+	if !strings.Contains(got, "Reader comment thread guidelines") {
+		t.Fatalf("genuine non-title h1 was dropped: %.200q", got)
 	}
 }

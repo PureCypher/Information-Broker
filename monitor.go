@@ -584,7 +584,7 @@ func (m *RSSMonitor) processArticle(item *gofeed.Item, feedURL string) bool {
 		defer fetchCancel()
 		startTime := time.Now()
 		var err error
-		content, contentHTML, err = m.fetchFullContent(fetchCtx, item.Link)
+		content, contentHTML, err = m.fetchFullContent(fetchCtx, item.Link, item.Title)
 		fetchDuration = time.Since(startTime)
 
 		if err != nil {
@@ -658,11 +658,18 @@ func (m *RSSMonitor) processArticle(item *gofeed.Item, feedURL string) bool {
 // <main> tag at all — without a matching selector, the body fallback pulled
 // in header/nav chrome (a search-box placeholder, a "Pricing" nav link)
 // ahead of the real per-page content.
+// norm collapses all whitespace runs to single spaces and trims, so heading
+// text can be compared against the RSS title regardless of the publisher's
+// line breaks and indentation.
+func norm(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
 // extractMainContent locates the article body of a parsed page and returns
 // both a plain-text form and the body's original HTML. Text feeds search,
 // previews, hashing, and summarisation; HTML backs structured rendering
 // (headings, lists, images) in the frontend.
-func extractMainContent(doc *goquery.Document) (text, bodyHTML string) {
+func extractMainContent(doc *goquery.Document, title string) (text, bodyHTML string) {
 	// goquery's .Text() returns the raw source text of <script>/<style>
 	// elements too (they're unrendered but still DOM text nodes) — strip
 	// them first so CSS rules or JS don't leak into the stored article text.
@@ -680,8 +687,11 @@ func extractMainContent(doc *goquery.Document) (text, bodyHTML string) {
 	// .sngl-article teaser cards), and renders a cookie-consent banner
 	// (.cli-bar-popup / #cookie-law-info-bar). None are article prose; strip
 	// them wherever they appear so a body fallback can't sweep them in.
+	// bleepingcomputer.com's .cz-news-story-title-section is its byline/date
+	// block — also chrome (the reading page renders byline and date itself).
 	doc.Find(".recommended-post, .top-article, .cli-bar-popup, " +
-		"#cookie-law-info-bar, #cookie_action_close_header").Remove()
+		"#cookie-law-info-bar, #cookie_action_close_header, " +
+		".cz-news-story-title-section").Remove()
 
 	// theregister.com labels every ad slot with <span class="ad-label">REG AD</span>;
 	// strip them so ad-slot labels don't pollute the extracted article text.
@@ -716,6 +726,13 @@ func extractMainContent(doc *goquery.Document) (text, bodyHTML string) {
 		// without this tier entry, extraction fell back to <body> and swept
 		// in its "You might also like" / "Recent Articles" widgets.
 		".article-details-block",
+		// bleepingcomputer.com wraps the prose in .articleBody; without it the
+		// <article> match swept in the leading h1+byline/date block too. Its
+		// .cz-news-story-title-section byline block (author h6 + date list)
+		// is chrome, never prose — strip it wherever it appears, since the
+		// longest-match ranking would otherwise pick the enclosing <article>
+		// over .articleBody.
+		".articleBody",
 	}
 	// Broad page wrappers, used ONLY when no precise selector matched — some
 	// sites (Bootstrap admin themes like cvefeed.io) have no article/
@@ -767,6 +784,21 @@ func extractMainContent(doc *goquery.Document) (text, bodyHTML string) {
 		"[role='toolbar'], [role='menu'], [role='menubar'], [role='navigation'], " +
 		".social-share, .share-buttons, .sharing-links").Remove()
 
+	// A publisher's leading <h1> that repeats the article title duplicates
+	// the headline the reading page already renders (bleepingcomputer puts
+	// the h1+byline block in a plain <div class="article_section"> outside
+	// any <header>; theregister's .k5a-article embeds its h1.headline
+	// similarly). Remove it only on an exact text match so genuine h1
+	// section headings survive. The title is unknown for some callers —
+	// pass "" to skip this check.
+	if norm(title) != "" {
+		best.Find("h1").First().Each(func(_ int, s *goquery.Selection) {
+			if norm(s.Text()) == norm(title) {
+				s.Remove()
+			}
+		})
+	}
+
 	text = strings.TrimSpace(best.Text())
 	bodyHTML, _ = goquery.OuterHtml(best)
 	// Only structural content (more than a bare paragraph or two) is worth
@@ -779,8 +811,9 @@ func extractMainContent(doc *goquery.Document) (text, bodyHTML string) {
 
 // fetchFullContent attempts to fetch the full content of an article. It
 // returns the plain-text form and, when the page has a real article body,
-// its original HTML for structured rendering.
-func (m *RSSMonitor) fetchFullContent(ctx context.Context, url string) (content, contentHTML string, err error) {
+// its original HTML for structured rendering. title is the RSS title, used
+// to drop a body-embedded duplicate headline.
+func (m *RSSMonitor) fetchFullContent(ctx context.Context, url, title string) (content, contentHTML string, err error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return "", "", err
@@ -813,7 +846,7 @@ func (m *RSSMonitor) fetchFullContent(ctx context.Context, url string) (content,
 		return "", "", err
 	}
 
-	text, bodyHTML := extractMainContent(doc)
+	text, bodyHTML := extractMainContent(doc, title)
 	if len(text) > m.config.Performance.MaxArticleContentLength { // Limit content length
 		// Truncate on a rune boundary; byte-slicing can split a multi-byte
 		// character and leave invalid UTF-8 that PostgreSQL rejects on save.

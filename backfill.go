@@ -18,18 +18,19 @@ import (
 // updates full_content, and clears summary so the pipeline regenerates it.
 // One-off maintenance command: `information-broker backfill <pattern>`.
 func runBackfill(db *sql.DB, cfg *config.Config, pattern string) error {
-	rows, err := db.Query(`SELECT id, url FROM articles WHERE url ILIKE '%' || $1 || '%' ORDER BY id`, pattern)
+	rows, err := db.Query(`SELECT id, url, title FROM articles WHERE url ILIKE '%' || $1 || '%' ORDER BY id`, pattern)
 	if err != nil {
 		return fmt.Errorf("select: %w", err)
 	}
 	type item struct {
-		id  int64
-		url string
+		id    int64
+		url   string
+		title string
 	}
 	var items []item
 	for rows.Next() {
 		var it item
-		if err := rows.Scan(&it.id, &it.url); err != nil {
+		if err := rows.Scan(&it.id, &it.url, &it.title); err != nil {
 			rows.Close()
 			return err
 		}
@@ -43,7 +44,7 @@ func runBackfill(db *sql.DB, cfg *config.Config, pattern string) error {
 	maxHTMLLen := cfg.Performance.MaxArticleHTMLLength
 	updated, skipped, failed := 0, 0, 0
 	for i, it := range items {
-		content, contentHTML, err := backfillFetch(client, cfg.API.UserAgent, it.url, maxLen, maxHTMLLen)
+		content, contentHTML, err := backfillFetch(client, cfg.API.UserAgent, it.url, it.title, maxLen, maxHTMLLen)
 		if err != nil {
 			log.Printf("  [%d/%d] id=%d FAIL: %v", i+1, len(items), it.id, err)
 			failed++
@@ -72,7 +73,10 @@ func runBackfill(db *sql.DB, cfg *config.Config, pattern string) error {
 	return nil
 }
 
-func backfillFetch(client *http.Client, ua, url string, maxLen, maxHTMLLen int) (string, string, error) {
+// backfillFetch fetches url and re-extracts it with the current extractor.
+// title is the stored article title, used to drop a body-embedded duplicate
+// headline; pass "" when unknown.
+func backfillFetch(client *http.Client, ua, url, title string, maxLen, maxHTMLLen int) (string, string, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return "", "", err
@@ -90,7 +94,7 @@ func backfillFetch(client *http.Client, ua, url string, maxLen, maxHTMLLen int) 
 	if err != nil {
 		return "", "", err
 	}
-	text, bodyHTML := extractMainContent(doc)
+	text, bodyHTML := extractMainContent(doc, title)
 	content := strings.TrimSpace(text)
 	if len(content) > maxLen {
 		content = safeTruncate(content, maxLen) + "..."

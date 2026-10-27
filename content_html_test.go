@@ -30,7 +30,7 @@ func TestExtractMainContentCapturesHTMLStructureAndImages(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 
-	text, bodyHTML := extractMainContent(doc)
+	text, bodyHTML := extractMainContent(doc, "")
 	if strings.Contains(text, "<img") || strings.Contains(text, "<h2") || strings.Contains(text, "<li>") {
 		t.Fatalf("text form should be tag-free, got: %s", text)
 	}
@@ -56,7 +56,7 @@ func TestExtractMainContentSkipsHTMLForTinyBodies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	text, bodyHTML := extractMainContent(doc)
+	text, bodyHTML := extractMainContent(doc, "")
 	if text != "Short note." {
 		t.Fatalf("text = %q, want %q", text, "Short note.")
 	}
