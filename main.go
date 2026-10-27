@@ -39,6 +39,20 @@ func main() {
 		return
 	}
 
+	// One-off maintenance: `information-broker requeue [--since 48h] [--dry-run]` pushes stored but
+	// unposted articles back through the summarization worker (catch-up after a summarizer outage).
+	if len(os.Args) > 1 && os.Args[1] == "requeue" {
+		db, err := initDatabase(cfg)
+		if err != nil {
+			log.Fatalf("requeue: db: %v", err)
+		}
+		defer db.Close()
+		if err := runRequeue(db, cfg, os.Args[2:]); err != nil {
+			log.Fatalf("requeue: %v", err)
+		}
+		return
+	}
+
 	// Setup logging
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.Println("Starting Information Broker RSS Monitor")
