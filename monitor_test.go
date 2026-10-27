@@ -235,3 +235,56 @@ func TestExtractMainContentStripsEmbeddedHeaderChrome(t *testing.T) {
 		t.Fatalf("article body HTML lost: %s", bodyHTML)
 	}
 }
+
+func TestExtractMainContentSecurityAffairsArticleDetailsBlock(t *testing.T) {
+	// Real-world case found live on securityaffairs.com (article id 90330):
+	// the real post body lives in <div class="article-details-block">, which
+	// matches none of the precise/fallback selectors, so extraction fell all
+	// the way back to <body> — sweeping in the "You might also like"
+	// (.recommended-post) and "Recent Articles" (.sngl-article/.top-article)
+	// widgets, the header headline marquee, the newsletter form, and the
+	// cookie-consent banner into full_content (and the summary generated
+	// from it). Adding .article-details-block to the precise tier makes the
+	// body win on length; the widget-class removals keep the cookie banner
+	// and marquee out of any future body fallback too.
+	body := strings.Repeat("CISA added the PHP flaws PHP2Shell to its Known Exploited Vulnerabilities catalog. ", 20)
+	html := `<html><body>
+		<header>
+			<div class="text-slider-wrap"><p><a href="/201840">U.S. CISA adds PHP flaws PHP2Shell to its Known Exploited Vulnerabilities catalog</a></p><p><a href="/201827">Attackers Take Control of Dahua Cameras</a></p></div>
+		</header>
+		<div class="article-details-block wow fadeInUp">
+			<h2>U.S. CISA adds PHP flaws PHP2Shell to its KEV catalog</h2>
+			<p>` + body + `</p>
+		</div>
+		<div class="recommended-post wow fadeInUp">
+			<h3>You might also like</h3>
+			<article class="sngl-article"><h6><a href="/201786">AI-Generated Fake Bank Calls and NFC App Enabled Fraud</a></h6><p class="cat-date">Cyber Crime / October 26, 2026</p></article>
+		</div>
+		<div class="top-article">
+			<div class="sngl-article-recent"><h6><a href="/201795">Magento Campaign Infects 953 Online Stores</a></h6><p class="cat-date">Malware / October 26, 2026</p></div>
+		</div>
+		<div class="cli-bar-popup">We use cookies on our website to give you the most relevant experience by remembering your preferences and repeat visits.</div>
+	</body></html>`
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	got, _ := extractMainContent(doc)
+	if strings.Contains(got, "You might also like") || strings.Contains(got, "Fake Bank Calls") {
+		t.Fatalf("recommended-post widget leaked into extracted content: %.200q", got)
+	}
+	if strings.Contains(got, "Magento Campaign") {
+		t.Fatalf("top-article recent widget leaked into extracted content: %.200q", got)
+	}
+	if strings.Contains(got, "We use cookies") {
+		t.Fatalf("cookie banner leaked into extracted content: %.200q", got)
+	}
+	if strings.Contains(got, "Attackers Take Control of Dahua") {
+		t.Fatalf("header marquee leaked into extracted content: %.200q", got)
+	}
+	if !strings.Contains(got, "Known Exploited Vulnerabilities catalog") {
+		t.Fatalf("expected the .article-details-block body, got: %.200q", got)
+	}
+}

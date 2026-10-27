@@ -675,6 +675,14 @@ func extractMainContent(doc *goquery.Document) (text, bodyHTML string) {
 	// stored) as if they were article prose.
 	doc.Find("#ar-widget").Remove()
 
+	// securityaffairs.com keeps its "You might also like" recommendations in
+	// .recommended-post and its "Recent Articles" grid in .top-article (with
+	// .sngl-article teaser cards), and renders a cookie-consent banner
+	// (.cli-bar-popup / #cookie-law-info-bar). None are article prose; strip
+	// them wherever they appear so a body fallback can't sweep them in.
+	doc.Find(".recommended-post, .top-article, .cli-bar-popup, " +
+		"#cookie-law-info-bar, #cookie_action_close_header").Remove()
+
 	// theregister.com labels every ad slot with <span class="ad-label">REG AD</span>;
 	// strip them so ad-slot labels don't pollute the extracted article text.
 	doc.Find(".ad-label").Remove()
@@ -690,6 +698,10 @@ func extractMainContent(doc *goquery.Document) (text, bodyHTML string) {
 		".article-body",
 		".post-body",
 		".k5a-article",
+		// securityaffairs.com wraps the real body in .article-details-block;
+		// without this tier entry, extraction fell back to <body> and swept
+		// in its "You might also like" / "Recent Articles" widgets.
+		".article-details-block",
 	}
 	// Broad page wrappers, used ONLY when no precise selector matched — some
 	// sites (Bootstrap admin themes like cvefeed.io) have no article/
