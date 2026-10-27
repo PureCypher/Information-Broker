@@ -19,7 +19,7 @@ Information Broker solves the challenge of staying informed in today's informati
                                                         │
 ┌─────────────────┐    ┌──────────────────┐             │
 │   Discord       │    │   AI Summary     │             │
-│   Webhook       │◀───│   (Ollama LLM)   │◀────────────┘
+│   Webhook       │◀───│   (llama.cpp LLM)   │◀────────────┘
 │                 │    │   - Local API    │
 └─────────────────┘    │                  │
                        └──────────────────┘
@@ -46,7 +46,7 @@ Information Broker solves the challenge of staying informed in today's informati
 
 - **RSS Monitor**: Continuously scrapes configured RSS feeds, performs content deduplication using SHA-256 hashing
 - **Summarization Scheduler**: Thread-safe single-worker queue ensuring only one AI request is in-flight at any time
-- **Ollama Integration**: Local LLM API for article summarization with configurable models and retry logic
+- **llama.cpp Integration**: Local llama-server (Vulkan GPU) for article summarization and a CPU server for story-clustering embeddings, with retry logic
 - **Discord Publisher**: Webhook-based notification system with formatted summaries and article links
 - **PostgreSQL Database**: Persistent storage for articles, summaries, logs, and operational metrics
 - **Prometheus Metrics**: Real-time monitoring of all pipeline stages with custom metrics
@@ -73,7 +73,7 @@ Information Broker solves the challenge of staying informed in today's informati
 - **Docker**: Version 20.10+ with Compose V2 support
 - **Docker Compose**: V2.0+ (usually bundled with Docker)
 - **Git**: For cloning the repository
-- **Ollama Server**: Local or remote instance with desired model (e.g., llama3)
+- **llama.cpp servers**: `llama-granite` (GPU, Vulkan) and `llama-embed` (CPU), started by docker compose from GGUF files in `MODELS_DIR`
 
 ### Step-by-Step Setup
 
@@ -99,9 +99,8 @@ Information Broker solves the challenge of staying informed in today's informati
 3. **Essential Configuration**
    After password generation, update these critical values in `.env`:
    ```bash
-   # Set your Ollama server URL and model
-   OLLAMA_URL=http://your-ollama-server:11434
-   OLLAMA_MODEL=llama3
+   # Directory holding granite-4.2-3b-Q4_K_M.gguf and nomic-embed-text-v1.5.f16.gguf
+   MODELS_DIR=./models
    
    # Configure Discord webhook (optional but recommended)
    DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/your/webhook/url
@@ -202,12 +201,14 @@ ARTICLE_CUTOFF_DATE=2025-05-31T00:00:00Z  # Only articles published on/after thi
                                           # Timezone-agnostic UTC comparison
 ```
 
-#### Ollama AI Configuration
+#### llama.cpp Configuration
 ```bash
-OLLAMA_URL=http://ollama:11434      # Ollama server endpoint
-OLLAMA_MODEL=llama3                # Model for summarization
-OLLAMA_TIMEOUT=60s                 # Request timeout
-OLLAMA_MAX_RETRIES=3               # Maximum retry attempts
+LLAMA_URL=http://llama-granite:8080     # Summarizer (/v1/chat/completions)
+LLAMA_EMBED_URL=http://llama-embed:8081 # Embeddings (/embedding)
+LLAMA_MODEL=granite-4.2-3b              # Name used in logs
+LLAMA_TIMEOUT=60s                       # Request timeout
+LLAMA_MAX_RETRIES=3                     # Maximum retry attempts
+LLAMA_MAX_TOKENS=512                    # Generated-token cap per summary
 ```
 
 #### Discord Integration
@@ -613,22 +614,22 @@ make dev-db-stop
 
 ### Common Issues and Solutions
 
-#### 1. Ollama Connection Failures
+#### 1. llama.cpp Connection Failures
 **Symptoms**: Summarization requests failing, queue building up
 ```bash
-# Check Ollama connectivity
-curl http://your-ollama-server:11434/api/tags
+# Check the llama.cpp servers
+docker exec information-broker-llama-granite curl -s localhost:8080/health
 
 # Verify model availability
-curl http://your-ollama-server:11434/api/show -d '{"name": "llama3"}'
+docker exec information-broker-llama-embed curl -s localhost:8081/health
 
 # Check logs for specific errors
-make logs | grep -i ollama
+make logs | grep -i llama
 ```
 
 **Solutions**:
-- Verify `OLLAMA_URL` in `.env` file
-- Ensure Ollama server is running and accessible
+- Verify `LLAMA_URL` and `LLAMA_EMBED_URL` in `.env` file
+- Ensure both llama containers are healthy, and that the host firewall allows the compose network
 - Check if the specified model is pulled: `ollama pull llama3`
 - Increase `OLLAMA_TIMEOUT` for slower responses
 

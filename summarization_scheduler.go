@@ -32,7 +32,7 @@ type SummarizationResponse struct {
 	Timestamp time.Time
 }
 
-// SummarizationScheduler manages a centralized queue for Ollama API calls
+// SummarizationScheduler manages a centralized queue for LLM API calls
 type SummarizationScheduler struct {
 	// Core components
 	queue         chan SummarizationRequest
@@ -169,7 +169,7 @@ func (s *SummarizationScheduler) EnqueueSummarization(request SummarizationReque
 
 	// Set default model if not specified
 	if request.Model == "" {
-		request.Model = s.config.OLLAMA.Model
+		request.Model = s.config.LLM.Model
 	}
 
 	// Attempt to enqueue with timeout to prevent blocking
@@ -311,7 +311,7 @@ func (s *SummarizationScheduler) processRequest(ctx context.Context, request Sum
 	for attempt := 1; attempt <= config.MaxRetries; attempt++ {
 		attemptStart := time.Now()
 
-		// Call the summarizer (this is the ONLY place Ollama is called)
+		// Call the summarizer (this is the ONLY place the summarizer LLM is called)
 		summary, err := s.summarizer.SummarizeArticleWithModel(requestCtx, request.Content, request.ArticleURL, request.Model)
 		attemptDuration := time.Since(attemptStart)
 

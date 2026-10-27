@@ -972,7 +972,7 @@ func (m *RSSMonitor) generateSummaryAsync(article Article) {
 		ArticleURL:   article.URL,
 		ArticleTitle: article.Title,
 		Content:      article.Content,
-		Model:        m.config.OLLAMA.Model,
+		Model:        m.config.LLM.Model,
 		Priority:     1, // Normal priority for RSS articles
 		EnqueuedAt:   time.Now(),
 		ResponseChan: nil, // No response channel needed for async processing

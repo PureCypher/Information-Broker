@@ -13,7 +13,7 @@ type Config struct {
 	Database      DatabaseConfig
 	App           AppConfig
 	API           APIConfig
-	OLLAMA        OLLAMAConfig
+	LLM           LLMConfig
 	Discord       DiscordConfig
 	Prometheus    PrometheusConfig
 	Security      SecurityConfig
@@ -57,12 +57,14 @@ type FlareSolverrConfig struct {
 	Timeout time.Duration
 }
 
-// OLLAMAConfig holds OLLAMA AI service configuration
-type OLLAMAConfig struct {
+// LLMConfig holds the llama.cpp servers: URL is the GPU summarizer, EmbedURL the CPU embedder.
+type LLMConfig struct {
 	URL        string
+	EmbedURL   string
 	Model      string
 	Timeout    time.Duration
 	MaxRetries int
+	MaxTokens  int
 }
 
 // DiscordConfig holds Discord webhook configuration
@@ -121,7 +123,6 @@ type ClusteringConfig struct {
 	WindowDays          int
 	BatchSize           int
 	SimilarityThreshold float64
-	EmbedModel          string
 }
 
 // Load loads configuration from environment variables
@@ -150,11 +151,13 @@ func Load() *Config {
 			URL:     getEnv("FLARESOLVERR_URL", ""),
 			Timeout: getEnvDuration("FLARESOLVERR_TIMEOUT", 60*time.Second),
 		},
-		OLLAMA: OLLAMAConfig{
-			URL:        getEnv("OLLAMA_URL", "http://localhost:11434"),
-			Model:      getEnv("OLLAMA_MODEL", "llama2"),
-			Timeout:    getEnvDuration("OLLAMA_TIMEOUT", 60*time.Second),
-			MaxRetries: getEnvInt("OLLAMA_MAX_RETRIES", 3),
+		LLM: LLMConfig{
+			URL:        getEnv("LLAMA_URL", "http://llama-granite:8080"),
+			EmbedURL:   getEnv("LLAMA_EMBED_URL", "http://llama-embed:8081"),
+			Model:      getEnv("LLAMA_MODEL", "granite-4.2-3b"),
+			Timeout:    getEnvDuration("LLAMA_TIMEOUT", 60*time.Second),
+			MaxRetries: getEnvInt("LLAMA_MAX_RETRIES", 3),
+			MaxTokens:  getEnvInt("LLAMA_MAX_TOKENS", 512),
 		},
 		Discord: DiscordConfig{
 			WebhookURL:    getEnv("DISCORD_WEBHOOK_URL", ""),
@@ -196,7 +199,6 @@ func Load() *Config {
 			WindowDays:          getEnvInt("CLUSTERING_WINDOW_DAYS", 35),
 			BatchSize:           getEnvInt("CLUSTERING_BATCH_SIZE", 200),
 			SimilarityThreshold: getEnvFloat("CLUSTERING_SIMILARITY_THRESHOLD", 0.85),
-			EmbedModel:          getEnv("CLUSTERING_EMBED_MODEL", "nomic-embed-text"),
 		},
 	}
 }

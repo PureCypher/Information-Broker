@@ -98,7 +98,7 @@ const failedSummaryMinContent = 300
 
 // loadFailedSummaryArticles selects articles whose summary is the literal
 // 'summary unavailable' marker the scheduler writes on failure: rows that
-// failed during an outage (e.g. Ollama unreachable) but are summarizable now.
+// failed during an outage (e.g. llama-server unreachable) but are summarizable now.
 // Posted state is intentionally NOT filtered: rows that failed before the
 // Discord post step are stranded — the live monitor never retries failed rows,
 // so without this catch-up they never get a summary. Disjoint from both other
@@ -152,7 +152,7 @@ func capCandidates(in []requeueArticle, limit int) []requeueArticle {
 //
 // It feeds stored-but-unposted articles back through the normal summarization worker, so Discord
 // posting, rate pacing and every filter behave exactly as for a freshly fetched article. Use it to
-// catch up after an outage of the summarizer (e.g. Ollama unreachable).
+// catch up after an outage of the summarizer (e.g. llama-server unreachable).
 //
 // With --skip-post nothing is sent to Discord: the webhooks are removed from the run's config,
 // and each article is marked posted once its summary is stored, so it is never picked up again.
@@ -239,7 +239,7 @@ func runRequeue(db *sql.DB, cfg *config.Config, args []string) error {
 			ArticleURL:   a.URL,
 			ArticleTitle: a.Title,
 			Content:      a.Content,
-			Model:        cfg.OLLAMA.Model,
+			Model:        cfg.LLM.Model,
 			Priority:     1,
 		}
 		resp, err := scheduler.EnqueueSummarizationSync(request, requeueSyncTimeout)
@@ -251,7 +251,7 @@ func runRequeue(db *sql.DB, cfg *config.Config, args []string) error {
 			consecutive++
 			log.Printf("requeue: [%d/%d] FAIL %q: %v", i+1, len(candidates), a.Title, err)
 			if consecutive >= requeueMaxConsecutive {
-				return fmt.Errorf("aborting after %d consecutive failures (is Ollama reachable?)", consecutive)
+				return fmt.Errorf("aborting after %d consecutive failures (is llama-server reachable?)", consecutive)
 			}
 			continue
 		}
