@@ -91,6 +91,12 @@ type ArticleView struct {
 	URL            string        `json:"url"`
 	Summary        *string       `json:"summary"`
 	Content        string        `json:"content"`
+	// ContentHTML is the structured article body (original headings, lists,
+	// images) when the source page provided one. Pointer + omitempty: absent
+	// on list/latest responses (which don't select the column) and on older
+	// backends. The frontend sanitizes it with a strict whitelist before
+	// rendering; never treat it as trusted.
+	ContentHTML    *string       `json:"content_html,omitempty"`
 	PublishedAt    time.Time     `json:"published_at"`
 	FetchDuration  time.Duration `json:"fetch_duration"`
 	FeedURL        string        `json:"feed_url"`
@@ -297,7 +303,7 @@ func (s *APIServer) getArticleByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := `SELECT id, title, url, summary, full_content, publish_date, fetch_duration_ms, feed_url, content_hash
+	query := `SELECT id, title, url, summary, full_content, content_html, publish_date, fetch_duration_ms, feed_url, content_hash
 		FROM articles WHERE id = $1`
 
 	var article ArticleView
@@ -308,6 +314,7 @@ func (s *APIServer) getArticleByID(w http.ResponseWriter, r *http.Request) {
 		&article.URL,
 		&article.Summary,
 		&article.Content,
+		&article.ContentHTML,
 		&article.PublishedAt,
 		&fetchDurationMs,
 		&article.FeedURL,

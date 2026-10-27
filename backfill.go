@@ -89,7 +89,8 @@ func backfillFetch(client *http.Client, ua, url string, maxLen int) (string, err
 	if err != nil {
 		return "", err
 	}
-	content := strings.TrimSpace(extractMainContent(doc))
+	text, _ := extractMainContent(doc)
+	content := strings.TrimSpace(text)
 	if len(content) > maxLen {
 		content = safeTruncate(content, maxLen) + "..."
 	}

@@ -13,6 +13,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -20,6 +21,8 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/mmcdole/gofeed"
+	"golang.org/x/net/html"
+	"golang.org/x/net/html/charset"
 )
 
 // Article represents a fetched article with all required information
@@ -28,10 +31,60 @@ type Article struct {
 	URL           string        `json:"url"`
 	PublishedAt   time.Time     `json:"published_at"`
 	Content       string        `json:"content"`
+	// ContentHTML is the extracted article body with its original structure
+	// (headings, lists, images) when the source provides HTML. Empty for
+	// plain-text sources. Not used for hashing, search, or summarisation —
+	// those consume Content.
+	ContentHTML   string        `json:"content_html,omitempty"`
 	FetchDuration time.Duration `json:"fetch_duration"`
 	FeedURL       string        `json:"feed_url"`
 	ContentHash   string        `json:"content_hash"`
 }
+
+// looksLikeHTML reports whether s carries markup rather than plain text.
+// Only opens on tags the frontend whitelist actually renders, so code
+// snippets quoting "<p>" in prose (rare but real) don't flip a text body
+// into HTML rendering.
+var htmlTagRe = regexp.MustCompile(`(?i)<(p|div|section|article|figure|figcaption|img|h[1-6]|ul|ol|li|table|blockquote|pre|strong|b|em|i|br)[ >/]`)
+
+func looksLikeHTML(s string) bool {
+	return htmlTagRe.MatchString(s)
+}
+
+// stripTags removes markup from s, keeping only text content (entities are
+// decoded upstream by gofeed). Used to derive the plain-text form of
+// HTML-bearing feed descriptions. The raw-text contents of script/style
+// elements are dropped, not kept.
+func stripTags(s string) string {
+	tok := html.NewTokenizer(strings.NewReader(s))
+	var out strings.Builder
+	// Depth counter for elements whose text content is never displayed.
+	skipDepth := 0
+	for {
+		tt := tok.Next()
+		if tt == html.ErrorToken {
+			break
+		}
+		switch tt {
+		case html.StartTagToken:
+			if name, _ := tok.TagName(); rawTextElements[string(name)] {
+				skipDepth++
+			}
+		case html.EndTagToken:
+			if name, _ := tok.TagName(); rawTextElements[string(name)] && skipDepth > 0 {
+				skipDepth--
+			}
+		case html.TextToken:
+			if skipDepth == 0 {
+				out.Write(tok.Text())
+			}
+		}
+	}
+	return strings.TrimSpace(out.String())
+}
+
+// rawTextElements: text inside these is data (CSS/JS), never article prose.
+var rawTextElements = map[string]bool{"script": true, "style": true, "title": true, "textarea": true}
 
 // RSSMonitor manages the monitoring of RSS feeds
 type RSSMonitor struct {
@@ -515,6 +568,7 @@ func (m *RSSMonitor) processArticle(item *gofeed.Item, feedURL string) bool {
 	m.mutex.Unlock()
 
 	var content string
+	var contentHTML string
 	var fetchDuration time.Duration
 
 	// cvefeed.io's RSS description already carries the structured vulnerability
@@ -530,12 +584,20 @@ func (m *RSSMonitor) processArticle(item *gofeed.Item, feedURL string) bool {
 		defer fetchCancel()
 		startTime := time.Now()
 		var err error
-		content, err = m.fetchFullContent(fetchCtx, item.Link)
+		content, contentHTML, err = m.fetchFullContent(fetchCtx, item.Link)
 		fetchDuration = time.Since(startTime)
 
 		if err != nil {
 			log.Printf("Failed to fetch content for %s: %v", item.Link, err)
-			content = item.Description // Fallback to description
+			// Fallback to the feed description. HTML-bearing descriptions keep
+			// their structure (in content_html) with a plain-text twin for
+			// search/summarisation; plain ones are stored as text as before.
+			if looksLikeHTML(item.Description) {
+				contentHTML = item.Description
+				content = stripTags(item.Description)
+			} else {
+				content = item.Description
+			}
 		}
 	}
 
@@ -544,6 +606,7 @@ func (m *RSSMonitor) processArticle(item *gofeed.Item, feedURL string) bool {
 		Title:         item.Title,
 		URL:           item.Link,
 		Content:       content,
+		ContentHTML:   contentHTML,
 		FetchDuration: fetchDuration,
 		FeedURL:       feedURL,
 	}
@@ -595,7 +658,11 @@ func (m *RSSMonitor) processArticle(item *gofeed.Item, feedURL string) bool {
 // <main> tag at all — without a matching selector, the body fallback pulled
 // in header/nav chrome (a search-box placeholder, a "Pricing" nav link)
 // ahead of the real per-page content.
-func extractMainContent(doc *goquery.Document) string {
+// extractMainContent locates the article body of a parsed page and returns
+// both a plain-text form and the body's original HTML. Text feeds search,
+// previews, hashing, and summarisation; HTML backs structured rendering
+// (headings, lists, images) in the frontend.
+func extractMainContent(doc *goquery.Document) (text, bodyHTML string) {
 	// goquery's .Text() returns the raw source text of <script>/<style>
 	// elements too (they're unrendered but still DOM text nodes) — strip
 	// them first so CSS rules or JS don't leak into the stored article text.
@@ -636,64 +703,92 @@ func extractMainContent(doc *goquery.Document) string {
 		".main-content",
 	}
 
-	longest := func(selectors []string) string {
-		var content string
+	// longest returns the candidate selection whose text is the longest —
+	// the real article body dwarfs teaser cards and chrome.
+	longest := func(selectors []string) *goquery.Selection {
+		var best *goquery.Selection
+		var bestLen int
 		for _, selector := range selectors {
 			doc.Find(selector).Each(func(_ int, s *goquery.Selection) {
-				if text := s.Text(); len(text) > len(content) {
-					content = text
+				if text := s.Text(); len(text) > bestLen {
+					best = s
+					bestLen = len(text)
 				}
 			})
 		}
-		return content
+		return best
 	}
 
-	content := longest(preciseSelectors)
-	if content == "" {
-		content = longest(fallbackSelectors)
+	best := longest(preciseSelectors)
+	if best == nil {
+		best = longest(fallbackSelectors)
 	}
-	if content == "" {
-		content = doc.Find("main").First().Text()
+	if best == nil {
+		best = doc.Find("main").First()
 	}
-	if content == "" {
-		content = doc.Find("body").Text()
+	if best == nil || best.Length() == 0 {
+		best = doc.Find("body").First()
 	}
-	return content
+
+	text = strings.TrimSpace(best.Text())
+	bodyHTML, _ = goquery.OuterHtml(best)
+	// Only structural content (more than a bare paragraph or two) is worth
+	// keeping as HTML; single-line extractions add nothing over the text.
+	if looksLikeHTML(bodyHTML) && len(bodyHTML) > 200 {
+		return text, bodyHTML
+	}
+	return text, ""
 }
 
-// fetchFullContent attempts to fetch the full content of an article
-func (m *RSSMonitor) fetchFullContent(ctx context.Context, url string) (string, error) {
+// fetchFullContent attempts to fetch the full content of an article. It
+// returns the plain-text form and, when the page has a real article body,
+// its original HTML for structured rendering.
+func (m *RSSMonitor) fetchFullContent(ctx context.Context, url string) (content, contentHTML string, err error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	req.Header.Set("User-Agent", m.config.API.UserAgent)
 
 	resp, err := m.httpClient.Do(req)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
+		return "", "", fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	// Decode per the page's declared charset (goquery alone assumes UTF-8;
+	// ISO-8859-1/GBK pages would otherwise yield mojibake or invalid UTF-8).
+	// charset.NewReader consults the Content-Type header, the meta tag, and
+	// the BOM, then strips a BOM as a side effect.
+	rdr, err := charset.NewReader(resp.Body, resp.Header.Get("Content-Type"))
+	if err != nil {
+		return "", "", err
 	}
 
 	// Parse HTML and extract text content
-	doc, err := goquery.NewDocumentFromReader(resp.Body)
+	doc, err := goquery.NewDocumentFromReader(rdr)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
-	content := strings.TrimSpace(extractMainContent(doc))
-	if len(content) > m.config.Performance.MaxArticleContentLength { // Limit content length
+	text, bodyHTML := extractMainContent(doc)
+	if len(text) > m.config.Performance.MaxArticleContentLength { // Limit content length
 		// Truncate on a rune boundary; byte-slicing can split a multi-byte
 		// character and leave invalid UTF-8 that PostgreSQL rejects on save.
-		content = safeTruncate(content, m.config.Performance.MaxArticleContentLength) + "..."
+		text = safeTruncate(text, m.config.Performance.MaxArticleContentLength) + "..."
+	}
+	if len(bodyHTML) > m.config.Performance.MaxArticleHTMLLength {
+		// A byte cut may split a tag or attribute; the frontend's parser
+		// tolerates truncated markup (unbalanced tags are auto-closed).
+		bodyHTML = safeTruncate(bodyHTML, m.config.Performance.MaxArticleHTMLLength)
 	}
 
-	return content, nil
+	return text, bodyHTML, nil
 }
 
 // generateContentHash creates a unique hash for content deduplication
@@ -708,8 +803,8 @@ func (m *RSSMonitor) generateContentHash(title, url, content string) string {
 // saveArticle saves an article to the database
 func (m *RSSMonitor) saveArticle(article Article) error {
 	query := `
-		INSERT INTO articles (title, url, full_content, publish_date, fetch_duration_ms, feed_url, content_hash, fetch_time, posted_to_discord)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), FALSE)
+		INSERT INTO articles (title, url, full_content, content_html, publish_date, fetch_duration_ms, feed_url, content_hash, fetch_time, posted_to_discord)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), FALSE)
 		ON CONFLICT (url) DO NOTHING`
 
 	// Strip any invalid UTF-8 before insert: a single bad byte makes PostgreSQL
@@ -719,6 +814,7 @@ func (m *RSSMonitor) saveArticle(article Article) error {
 		sanitizeUTF8(article.Title),
 		sanitizeUTF8(article.URL),
 		sanitizeUTF8(article.Content),
+		sanitizeUTF8(article.ContentHTML),
 		article.PublishedAt,
 		article.FetchDuration.Milliseconds(),
 		sanitizeUTF8(article.FeedURL),

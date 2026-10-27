@@ -90,9 +90,13 @@ type SecurityConfig struct {
 type PerformanceConfig struct {
 	MaxConcurrentFeeds      int
 	MaxArticleContentLength int
-	HTTPReadTimeout         time.Duration
-	HTTPWriteTimeout        time.Duration
-	HTTPIdleTimeout         time.Duration
+	// MaxArticleHTMLLength bounds the stored structured article body
+	// (content_html). HTML is heavier than text, so it gets its own (larger)
+	// cap; the frontend sanitizes it before rendering.
+	MaxArticleHTMLLength int
+	HTTPReadTimeout      time.Duration
+	HTTPWriteTimeout     time.Duration
+	HTTPIdleTimeout      time.Duration
 }
 
 // ContentConfig holds content processing configuration
@@ -170,6 +174,7 @@ func Load() *Config {
 		Performance: PerformanceConfig{
 			MaxConcurrentFeeds:      getEnvInt("MAX_CONCURRENT_FEEDS", 10),
 			MaxArticleContentLength: getEnvInt("MAX_ARTICLE_CONTENT_LENGTH", 10000),
+			MaxArticleHTMLLength:    getEnvInt("MAX_ARTICLE_HTML_LENGTH", 65536),
 			HTTPReadTimeout:         getEnvDuration("HTTP_READ_TIMEOUT", 15*time.Second),
 			HTTPWriteTimeout:        getEnvDuration("HTTP_WRITE_TIMEOUT", 15*time.Second),
 			HTTPIdleTimeout:         getEnvDuration("HTTP_IDLE_TIMEOUT", 60*time.Second),

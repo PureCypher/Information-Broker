@@ -274,6 +274,9 @@ func createTables(db *sql.DB) error {
 		// story_cluster_id is self-referencing (a cluster's seed article's own id).
 		`ALTER TABLE articles ADD COLUMN IF NOT EXISTS summary_embedding real[]`,
 		`ALTER TABLE articles ADD COLUMN IF NOT EXISTS story_cluster_id BIGINT`,
+		// content_html backs structured article rendering (headings, lists,
+		// images) in the frontend; full_content remains the plain-text form.
+		`ALTER TABLE articles ADD COLUMN IF NOT EXISTS content_html TEXT`,
 		`CREATE INDEX IF NOT EXISTS idx_articles_story_cluster_id ON articles(story_cluster_id)`,
 		`CREATE TABLE IF NOT EXISTS fetch_logs (
 			id SERIAL PRIMARY KEY,

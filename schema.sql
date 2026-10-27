@@ -27,7 +27,14 @@ CREATE TABLE IF NOT EXISTS articles (
     -- similarity comparisons (no pgvector -- plain Postgres array, compared in Go);
     -- story_cluster_id is self-referencing (a cluster's seed article's own id).
     summary_embedding real[],
-    story_cluster_id BIGINT
+    story_cluster_id BIGINT,
+
+    -- content_html stores the extracted article body with its original HTML
+    -- structure (headings, paragraphs, lists, images) when the source page
+    -- provides it. full_content keeps the plain-text form for search,
+    -- previews, and summarisation. The frontend sanitizes content_html with
+    -- a strict tag/attribute whitelist before rendering.
+    content_html TEXT
 );
 
 -- Webhook logs table for tracking Discord webhook attempts
