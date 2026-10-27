@@ -560,3 +560,186 @@ func TestExtractMainContentKeepsSubtitleAndGenuineH1(t *testing.T) {
 		t.Fatalf("genuine non-title h1 was dropped: %.200q", got)
 	}
 }
+
+func TestExtractMainContentTruncatesCSOOnlineNewsletterTail(t *testing.T) {
+	// csoonline.com (IDG) rows ~307/308/303: the prose container ends with a
+	// JS-rendered "SUBSCRIBE TO OUR NEWSLETTER" widget (heading in arbitrary
+	// casing, pitch copy, email capture). Everything from the heading on is
+	// widget chrome and must be cut; the prose before it must survive.
+	prose := strings.Repeat("Another threat group has started abusing the same toolkit for initial access. ", 8)
+	html := `<html><body>
+		<div class="content">
+			<p>` + prose + `</p>
+			<div class="newsletter-widget">
+				<h3>SUBSCRIBE TO OUR NEWSLETTER</h3>
+				<p>From our editors straight to your inbox</p>
+				<p>Get started by entering your email address below.</p>
+				<div>Please enter a valid email address</div>
+			</div>
+		</div>
+	</body></html>`
+
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+	got, _ := extractMainContent(doc, "Serpentine#Cloud attack opens RAT-based backdoor")
+	if strings.Contains(strings.ToLower(got), "newsletter") || strings.Contains(got, "inbox") {
+		t.Fatalf("newsletter widget survived in prose: %.300q", got)
+	}
+	if !strings.Contains(got, "Another threat group has started abusing") {
+		t.Fatalf("prose before the widget was dropped: %.200q", got)
+	}
+}
+
+func TestExtractMainContentDropsReadMoreLinkParagraphs(t *testing.T) {
+	// infosecurity-magazine.com rows 1556/1870/2639: related-article links
+	// are embedded mid-prose as standalone <p><em><a>Read more: <headline>
+	// </a></em></p> blocks. They are recirculation lines, not prose; prose
+	// that merely mentions "read more" mid-sentence must survive.
+	prose := "The attackers sought to sell it to a state-linked actor seeking intelligence. More about read more handling in prose here. "
+	html := `<html><body>
+		<div class="content">
+			<p>` + prose + `</p>
+			<p><em><a href="https://www.infosecurity-magazine.com/news/related/" target="_blank">Read more: Chinese State Hackers Exploiting Newly Disclosed Ivanti Flaw</a></em></p>
+			<p>ANSSI's assessment of the Ivanti flaw confirmed the findings.</p>
+		</div>
+	</body></html>`
+
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+	got, _ := extractMainContent(doc, "ANSSI assesses Ivanti flaw exploitation")
+	if strings.Contains(got, "Chinese State Hackers Exploiting") {
+		t.Fatalf("Read more: link paragraph survived: %.300q", got)
+	}
+	if !strings.Contains(got, "read more handling in prose") {
+		t.Fatalf("prose mentioning the phrase was dropped: %.200q", got)
+	}
+	if !strings.Contains(got, "ANSSI's assessment") {
+		t.Fatalf("paragraph after the link block was dropped: %.200q", got)
+	}
+}
+
+func TestExtractMainContentPrefersNestedPreciseContainer(t *testing.T) {
+	// infostealers.com (2026-10): <article> wraps the real prose in
+	// .entry-content alongside a sidebar <aside> holding "Recent articles",
+	// a sightings dashboard and a "Weekly Briefing" signup — together about
+	// half the container's text. The aside guard keeps asides only when
+	// removal would take more than half, and this sidebar sat exactly at
+	// 50.4%, so the stored body was half sidebar chrome. When the winning
+	// container wraps a precise candidate that holds most of its non-aside
+	// prose, prefer that inner container.
+	prose := strings.Repeat("The infostealer malware harvested browser credentials and session cookies from the victim machines. ", 12)
+	sidebar := strings.Repeat("Recent articles Weekly Briefing Total Sightings 49,631 Read report ", 12)
+	html := `<html><body>
+		<main>
+			<article>
+				<div class="entry-content prose">
+					<h1>Revolut Hackers Used Infostealers for Elaborate Social Engineering</h1>
+					<p>` + prose + `</p>
+				</div>
+				<aside class="lg:col-span-3">
+					<div class="glass-card">` + sidebar + `</div>
+				</aside>
+			</article>
+		</main>
+	</body></html>`
+
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+	got, _ := extractMainContent(doc, "Revolut Hackers Used Infostealers for Elaborate Social Engineering")
+	for _, junk := range []string{"Recent articles", "Weekly Briefing", "Total Sightings", "Read report"} {
+		if strings.Contains(got, junk) {
+			t.Fatalf("sidebar chrome %q leaked into extracted content: %.200q", junk, got)
+		}
+	}
+	if !strings.Contains(got, "harvested browser credentials") {
+		t.Fatalf("expected the article prose, got: %.200q", got)
+	}
+}
+
+func TestExtractMainContentStripsEmbeddedPageTitle(t *testing.T) {
+	// infostealers.com embeds a complete HTML document (its own <head>,
+	// <title> and <style>) inside the prose container. The style tag was
+	// already dropped, but the embedded page <title> survived as a phantom
+	// headline line above the real body.
+	prose := strings.Repeat("The investigation linked the campaign to a financially motivated threat group. ", 8)
+	embedded := `<!DOCTYPE html><html lang="en"><head><title>Revolut Hackers Exploited Infostealers for Social Engineering</title><style>body { background-color: #151d2c; }</style></head><body><h1>Revolut Hackers Used Infostealers for Elaborate Social Engineering</h1><p>` + prose + `</p></body></html>`
+	html := `<html><body>
+		<article><div class="entry-content prose">
+			` + embedded + `
+			<p>Follow-up reporting confirmed the initial findings.</p>
+		</div></article>
+	</body></html>`
+
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+	got, _ := extractMainContent(doc, "Revolut Hackers Used Infostealers for Elaborate Social Engineering")
+	for _, junk := range []string{"Exploited Infostealers for Social Engineering", "background-color"} {
+		if strings.Contains(got, junk) {
+			t.Fatalf("embedded-document chrome %q leaked into extracted content: %.300q", junk, got)
+		}
+	}
+	if !strings.Contains(got, "linked the campaign") {
+		t.Fatalf("expected the article prose, got: %.300q", got)
+	}
+}
+
+func TestExtractMainContentRapid7BlogTagsAndFooter(t *testing.T) {
+	// rapid7.com's blog template puts the tag cloud and share footer INSIDE
+	// <article> (data-testid="blog-post-article-tags" / "blog-post-footer");
+	// the stored body ended with "Article tagsEmergent Threat Response...
+	// Share this articleStephen FewerAuthor's articles".
+	prose := strings.Repeat("Rapid7 disclosed a patched Microsoft SharePoint remote code execution vulnerability. ", 8)
+	html := `<html><body>
+		<main><article id="blog-content-section">
+			<div class="blog-content"><p>` + prose + `</p></div>
+			<section data-testid="blog-post-article-tags">
+				<h2>Article tags</h2>
+				<ul><li><a href="/blog/tag/emergent-threat-response/">Emergent Threat Response</a></li></ul>
+			</section>
+			<footer data-testid="blog-post-footer">
+				<p>Share this article</p>
+				<span>Stephen Fewer</span><a href="/blog/author/stephen-fewer/">Author's articles</a>
+			</footer>
+		</article></main>
+	</body></html>`
+
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+	got, _ := extractMainContent(doc, "CVE-2026-63520: Microsoft SharePoint remote code execution fixed")
+	for _, junk := range []string{"Article tags", "Emergent Threat Response", "Share this article", "Stephen Fewer", "Author's articles"} {
+		if strings.Contains(got, junk) {
+			t.Fatalf("rapid7 blog chrome %q leaked into extracted content: %.200q", junk, got)
+		}
+	}
+	if !strings.Contains(got, "SharePoint remote code execution") {
+		t.Fatalf("expected the article prose, got: %.200q", got)
+	}
+}
+
+func TestExtractMainContentElasticLabsChrome(t *testing.T) {
+	// elastic.co security-labs report pages have no article wrapper, so
+	// extraction falls to <main>: a newsletter promo <section> (promo-banner
+	// class family) and a "Report an issue" feedback link row after the
+	// prose leaked into the stored body.
+	prose := strings.Repeat("Elastic Security achieved a perfect detection score across the evaluated platforms. ", 8)
+	html := `<html><body>
+		<main>
+			<section class="bg-surface py-10"><div>
+				<p>` + prose + `</p>
+				<p>Full results are available on the AV-Comparatives website.</p>
+				<div class="flex items-start gap-4"><a href="https://discuss.elastic.co/c/labs/">Report an issue</a></div>
+			</div></section>
+			<section class="bg-surface py-20"><div>
+				<div class="size-promo-banner-dog-ear"></div>
+				<h3>Elastic Security Labs Newsletter</h3>
+				<p>Subscribe for monthly research updates.</p>
+			</div></section>
+		</main>
+	</body></html>`
+
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+	got, _ := extractMainContent(doc, "Elastic Security scores 100% in AV-Comparatives Business Security Test")
+	for _, junk := range []string{"Report an issue", "Newsletter", "Subscribe for monthly", "promo"} {
+		if strings.Contains(got, junk) {
+			t.Fatalf("elastic labs chrome %q leaked into extracted content: %.200q", junk, got)
+		}
+	}
+	if !strings.Contains(got, "perfect detection score") && !strings.Contains(got, "AV-Comparatives website") {
+		t.Fatalf("expected the article prose, got: %.200q", got)
+	}
+}

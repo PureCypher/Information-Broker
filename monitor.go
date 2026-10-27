@@ -673,7 +673,11 @@ func extractMainContent(doc *goquery.Document, title string) (text, bodyHTML str
 	// goquery's .Text() returns the raw source text of <script>/<style>
 	// elements too (they're unrendered but still DOM text nodes) — strip
 	// them first so CSS rules or JS don't leak into the stored article text.
-	doc.Find("script, style").Remove()
+	// "title" too: infostealers.com articles embed a complete HTML document
+	// (its own <head>/<title>/<style>) inside the prose container; the style
+	// tag is dropped above but the embedded page <title> would survive as a
+	// phantom headline line. A <title> is never reader prose.
+	doc.Find("script, style, title").Remove()
 
 	// Strip known non-article widgets before measuring/using any selector's
 	// text — e.g. "#ar-widget" is a common "Listen to this article"
@@ -741,6 +745,27 @@ func extractMainContent(doc *goquery.Document, title string) (text, bodyHTML str
 		`[data-component-name="PostArticleLinks"], ` +
 		`aside[data-mrf-recirculation]`).Remove()
 
+	// rapid7.com's blog template puts the tag cloud and share footer INSIDE
+	// <article> (data-testid="blog-post-article-tags" / "blog-post-footer").
+	// Tag links and a share rail are chrome, never prose.
+	doc.Find(`[data-testid="blog-post-article-tags"], ` +
+		`[data-testid="blog-post-footer"]`).Remove()
+
+	// elastic.co security-labs pages end with a newsletter promo <section>
+	// (its banner uses the publisher's "promo-banner" class family) and a
+	// "Report an issue" feedback link row after the prose. Neither is
+	// article prose.
+	doc.Find("section").Each(func(_ int, s *goquery.Selection) {
+		if s.Find(`[class*="promo-banner"]`).Length() > 0 {
+			s.Remove()
+		}
+	})
+	doc.Find("a").Each(func(_ int, s *goquery.Selection) {
+		if norm(s.Text()) == "Report an issue" {
+			s.Parent().Remove()
+		}
+	})
+
 	// Precise, high-confidence article-body selectors. Within this tier the
 	// longest match wins (a real post body dwarfs a related-post teaser card;
 	// this is the hackread.com fix). ".k5a-article" is theregister.com's
@@ -803,20 +828,40 @@ func extractMainContent(doc *goquery.Document, title string) (text, bodyHTML str
 		best = doc.Find("body").First()
 	}
 
-	// The article container's own header/nav/footer chrome is not prose:
-	// Ars Technica's <article> embeds the full headline block (title, kicker,
-	// byline, date, category icon) inside <header>, so the stored HTML would
-	// duplicate the title and byline the reading page already renders.
-	// Strip those subtrees after selection; ranking above already happened
-	// on the full text, so this only trims the stored copy.
-	//
-	// EXCEPT for <aside>: techradar.com's 2026 template wraps the actual
-	// article prose in an <aside> (semantic misuse, but that's where the
-	// body is). Removing every aside there deleted ~86% of the extracted
-	// body (26,779 -> 2,989 chars on a live page). Chrome asides are a
-	// small fraction of the container, so guard: if removing aside would
-	// take more than half the container's text, the asides ARE the body —
-	// keep them.
+	// If the winning container merely wraps another precise candidate that
+	// holds most of its non-<aside> prose, prefer the inner candidate: it is
+	// the real prose container, and the outer's remaining extra text is
+	// title/byline chrome the reading page renders itself. This settles
+	// infostealers.com, whose <article> wraps .entry-content alongside a
+	// sidebar <aside> that holds half the container's text — exactly the
+	// ratio the aside guard below cannot classify. The inner must not
+	// itself live inside an <aside>: techradar's body-in-aside template
+	// would otherwise be discarded wholesale.
+	noaside := best.Clone()
+	noaside.Find("aside").Remove()
+	noasideLen := len(noaside.Text())
+	if noasideLen > 0 {
+		var inner *goquery.Selection
+		for _, sel := range preciseSelectors {
+			best.Find(sel).Each(func(_ int, s *goquery.Selection) {
+				if s.Get(0) == best.Get(0) || (inner != nil && len(s.Text()) <= len(inner.Text())) {
+					return
+				}
+				for p := s.Parent(); p.Length() > 0 && p.Get(0) != best.Get(0); p = p.Parent() {
+					if n := p.Get(0); n.Type == html.ElementNode && n.Data == "aside" {
+						return // the inner lives inside an <aside>
+					}
+				}
+				if len(s.Text())*2 >= noasideLen {
+					inner = s
+				}
+			})
+		}
+		if inner != nil {
+			best = inner
+		}
+	}
+
 	stripChrome := func(sel string) {
 		before := len(best.Text())
 		clone := best.Clone()
@@ -830,6 +875,36 @@ func extractMainContent(doc *goquery.Document, title string) (text, bodyHTML str
 		"[role='toolbar'], [role='menu'], [role='menubar'], [role='navigation'], " +
 		".social-share, .share-buttons, .sharing-links, [class*='sharethis']").Remove()
 	stripChrome("aside")
+
+	// CSO Online (IDG) pages end the body with a "SUBSCRIBE TO OUR
+	// NEWSLETTER" widget — heading, pitch copy and an email-capture block
+	// the prose container sweeps in as a tail (2348-row feed; the widget is
+	// JS-rendered, so the form strip above misses it). Truncate the body at
+	// the heading: everything from it on is widget chrome.
+	newsletter := best.Find("*").FilterFunction(func(_ int, s *goquery.Selection) bool {
+		return strings.ToLower(norm(s.Text())) == "subscribe to our newsletter"
+	}).Last()
+	if newsletter.Length() > 0 {
+		// Climb from the heading to best's direct child; drop that child and
+		// every sibling after it.
+		c := newsletter
+		for c.Parent().Length() > 0 && c.Parent().Get(0) != best.Get(0) {
+			c = c.Parent()
+		}
+		c.NextAll().Remove()
+		c.Remove()
+	}
+
+	// infosecurity-magazine.com embeds related-article links mid-prose as
+	// standalone paragraphs: <p><em><a>Read more: <headline></a></em></p>.
+	// A block whose entire text opens with "Read more:" is a recirculation
+	// line, never prose; strip it. Prose that merely links elsewhere or
+	// mentions the phrase has additional text and survives.
+	best.Find("p, li").Each(func(_ int, s *goquery.Selection) {
+		if strings.HasPrefix(strings.ToLower(norm(s.Text())), "read more:") {
+			s.Remove()
+		}
+	})
 
 	// A publisher's leading <h1> that repeats the article title duplicates
 	// the headline the reading page already renders (bleepingcomputer puts
