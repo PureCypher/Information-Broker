@@ -689,9 +689,14 @@ func extractMainContent(doc *goquery.Document, title string) (text, bodyHTML str
 	// them wherever they appear so a body fallback can't sweep them in.
 	// bleepingcomputer.com's .cz-news-story-title-section is its byline/date
 	// block — also chrome (the reading page renders byline and date itself).
+	// .post-time is securityaffairs.com's byline/date block and .cta-tags its
+	// tag cloud — both live inside .article-details-block, so the
+	// container-fallback sweep would otherwise store them as article prose
+	// (the reading page renders byline/date itself and has no use for a tag
+	// link list).
 	doc.Find(".recommended-post, .top-article, .cli-bar-popup, " +
 		"#cookie-law-info-bar, #cookie_action_close_header, " +
-		".cz-news-story-title-section").Remove()
+		".cz-news-story-title-section, .post-time, .cta-tags").Remove()
 
 	// theregister.com labels every ad slot with <span class="ad-label">REG AD</span>;
 	// strip them so ad-slot labels don't pollute the extracted article text.
@@ -834,6 +839,16 @@ func extractMainContent(doc *goquery.Document, title string) (text, bodyHTML str
 	// section headings survive. The title is unknown for some callers —
 	// pass "" to skip this check.
 	if norm(title) != "" {
+		// securityaffairs.com wraps its duplicate headline in an h2 inside a
+		// .common-heading.article-title div that is the container's first
+		// child — the h1-only check below never sees it. Drop any leading
+		// child whose entire text is the title: the reading page renders the
+		// headline itself, so a body that restates it as its first block is
+		// duplication noise. Exact match keeps genuine lead paragraphs and
+		// section headings.
+		if first := best.Children().First(); first.Length() > 0 && norm(first.Text()) == norm(title) {
+			first.Remove()
+		}
 		best.Find("h1").First().Each(func(_ int, s *goquery.Selection) {
 			if norm(s.Text()) == norm(title) {
 				s.Remove()

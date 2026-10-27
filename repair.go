@@ -37,7 +37,8 @@ type repairRow struct {
 
 // selectRepairCandidates filters rows for a repair run: contaminated rows
 // (content containing a boilerplate marker, case-insensitively — publishers
-// render widget headings in arbitrary casing), or every row with --all.
+// render widget headings in arbitrary casing; or a first line that restates
+// the headline), or every row with --all.
 // Order is stable by ID, and limit>0 caps the batch (0 = no cap), so runs
 // are bounded and safe to rerun.
 func selectRepairCandidates(rows []repairRow, all bool, limit int) []repairRow {
@@ -50,6 +51,18 @@ func selectRepairCandidates(rows []repairRow, all bool, limit int) []repairRow {
 				if strings.Contains(lower, strings.ToLower(m)) {
 					contaminated = true
 					break
+				}
+			}
+			// A body whose first line equals the article title carries a
+			// body-embedded duplicate headline (publisher title/byline block
+			// inside the prose container). Re-extracting with the
+			// leading-title drop is the only way to clean those rows, so
+			// flag them too. A false positive costs one re-fetch and no
+			// change — updates happen only when the extracted text differs.
+			if !contaminated {
+				firstLine := strings.TrimSpace(strings.SplitN(r.FullContent, "\n", 2)[0])
+				if firstLine != "" && strings.EqualFold(firstLine, strings.TrimSpace(r.Title)) {
+					contaminated = true
 				}
 			}
 			if !contaminated {

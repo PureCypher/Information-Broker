@@ -439,6 +439,55 @@ func TestExtractMainContentDropsDuplicateTitleH1(t *testing.T) {
 	}
 }
 
+func TestExtractMainContentDropsSecurityAffairsTitleBlock(t *testing.T) {
+	// securityaffairs.com (2026-10, row 90330) keeps the duplicate headline
+	// inside the prose container as an <h2> wrapped in a
+	// .common-heading.article-title div — the leading h1 check never sees an
+	// h2. Its .post-time byline block and trailing .cta-tags tag cloud live
+	// inside .article-details-block too, so they must be stripped as chrome
+	// or they are stored as article prose. The hero image is real content
+	// and must survive.
+	prose := strings.Repeat("CISA added the PHP flaws tracked as PHP2Shell to its exploited vulnerabilities catalog. ", 8)
+	html := `<html><body>
+		<div class="article-details-block wow fadeInUp">
+			<div class="common-heading line-bottom article-title mb-3">
+				<h2>U.S. CISA adds PHP flaws PHP2Shell to its Known Exploited Vulnerabilities catalog</h2>
+			</div>
+			<div class="post-time mb-3">
+				<span><i><img src="user-icon.svg" alt=""/></i> <a href="/author/paganinip">Pierluigi Paganini</a></span>
+				<span><i><img src="clock-icon.svg" alt=""/></i> October 27, 2026</span>
+			</div>
+			<img class="img-fluid mb-4" src="https://securityaffairs.com/wp/hero.jpg" alt="PHP2Shell"/>
+			<p>` + prose + `</p>
+			<div class="cta-tags">
+				<a class="cat-tag" href="/tag/cisa">CISA</a>
+				<a class="cat-tag" href="/tag/hacking">Hacking</a>
+				<a class="cat-tag" href="/tag/security-news">Security News</a>
+				<a class="cat-tag" href="/tag/php">PHP</a>
+				<a class="cat-tag" href="/tag/php2shell">php2shell</a>
+			</div>
+		</div>
+	</body></html>`
+
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+	got, htmlOut := extractMainContent(doc, "U.S. CISA adds PHP flaws PHP2Shell to its Known Exploited Vulnerabilities catalog")
+	if strings.Count(got, "U.S. CISA adds PHP flaws PHP2Shell") != 0 {
+		t.Fatalf("duplicate title survived in text: %.200q", got)
+	}
+	if strings.Contains(got, "Pierluigi Paganini") || strings.Contains(got, "October 27, 2026") {
+		t.Fatalf("byline leaked into prose: %.200q", got)
+	}
+	if strings.Contains(got, "cat-tag") || strings.Contains(got, "Security News") {
+		t.Fatalf("tag cloud leaked into prose: %.200q", got)
+	}
+	if !strings.Contains(got, "exploited vulnerabilities catalog") {
+		t.Fatalf("prose missing: %.200q", got)
+	}
+	if !strings.Contains(htmlOut, "hero.jpg") {
+		t.Fatalf("hero image was dropped: %.300q", htmlOut)
+	}
+}
+
 func TestExtractMainContentKeepsSubtitleAndGenuineH1(t *testing.T) {
 	// theregister.com: the h1.headline matches the RSS title and must be
 	// dropped, but its <p class="subtitle"> is real editorial content and a
