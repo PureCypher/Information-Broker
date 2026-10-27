@@ -61,11 +61,13 @@ services:
       FLARESOLVERR_URL: ${FLARESOLVERR_URL:-http://flaresolverr:8191/v1}
       FLARESOLVERR_TIMEOUT: ${FLARESOLVERR_TIMEOUT:-60s}
       
-      # OLLAMA Configuration
-      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama2}
-      OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-60s}
-      OLLAMA_MAX_RETRIES: ${OLLAMA_MAX_RETRIES:-3}
+      # llama.cpp Configuration (summarizer on the GPU, embeddings on the CPU)
+      LLAMA_URL: ${LLAMA_URL:-http://llama-granite:8080}
+      LLAMA_EMBED_URL: ${LLAMA_EMBED_URL:-http://llama-embed:8081}
+      LLAMA_MODEL: ${LLAMA_MODEL:-granite-4.2-3b}
+      LLAMA_TIMEOUT: ${LLAMA_TIMEOUT:-60s}
+      LLAMA_MAX_RETRIES: ${LLAMA_MAX_RETRIES:-3}
+      LLAMA_MAX_TOKENS: ${LLAMA_MAX_TOKENS:-512}
       
       # Discord Configuration
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
@@ -216,39 +218,99 @@ services:
         max-size: "50m"
         max-file: "3"
 
-  # OLLAMA AI Service (Optional)
-  # ollama:
-  #   image: ollama/ollama:latest
-  #   container_name: information-broker-ollama
-  #   ports:
-  #     - "${OLLAMA_PORT:-11434}:11434"
-  #   volumes:
-  #     - ollama_data:/root/.ollama
-  #   environment:
-  #     OLLAMA_HOST: "0.0.0.0"
-  #     OLLAMA_ORIGINS: "*"
-  #   healthcheck:
-  #     test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 3
-  #     start_period: 60s
-  #   restart: unless-stopped
-  #   networks:
-  #     - app-network
-  #   logging:
-  #     driver: "json-file"
-  #     options:
-  #       max-size: "100m"
-  #       max-file: "3"
-    # Uncomment if you have GPU support
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
+  # llama.cpp: summarizer on the Vega 64 (Vulkan/RADV). All layers on the GPU.
+  # Tuned with llama-bench: flash attention on, f16 KV cache (quantised KV was slower),
+  # -ub 1024 (prompt processing plateaus there). Two slots let the scheduler overlap requests.
+  llama-granite:
+    image: ghcr.io/ggml-org/llama.cpp:server-vulkan
+    container_name: information-broker-llama-granite
+    command:
+      - --model
+      - "/models/${LLAMA_MODEL_FILE:-granite-4.2-3b-Q4_K_M.gguf}"
+      - --alias
+      - "${LLAMA_MODEL:-granite-4.2-3b}"
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8080"
+      - --n-gpu-layers
+      - "99"
+      - --flash-attn
+      - "on"
+      - --ctx-size
+      - "${LLAMA_CTX_SIZE:-16384}"
+      - --parallel
+      - "${LLAMA_PARALLEL:-2}"
+      - --batch-size
+      - "2048"
+      - --ubatch-size
+      - "1024"
+      - --jinja
+      - --chat-template-kwargs
+      - '{"enable_thinking":false}'
+      - --metrics
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "${RENDER_GID:-993}"
+      - "${VIDEO_GID:-44}"
+    volumes:
+      - ${MODELS_DIR:-./models}:/models:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+      - app-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  # llama.cpp: embeddings on the CPU for story clustering (runs every 15 min, so no GPU needed).
+  llama-embed:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: information-broker-llama-embed
+    command:
+      - --model
+      - "/models/${LLAMA_EMBED_MODEL_FILE:-nomic-embed-text-v1.5.f16.gguf}"
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8081"
+      - --embeddings
+      - --pooling
+      - "mean"
+      - --ctx-size
+      - "4096"
+      - --batch-size
+      - "2048"
+      - --ubatch-size
+      - "2048"
+      - --threads
+      - "${LLAMA_EMBED_THREADS:-8}"
+      - --n-gpu-layers
+      - "0"
+    volumes:
+      - ${MODELS_DIR:-./models}:/models:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8081/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - app-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
 
   # Alerting Service
   alertmanager:
@@ -294,5 +356,3 @@ volumes:
     name: information-broker-prometheus-data
   grafana_data:
     name: information-broker-grafana-data
-  ollama_data:
-    name: information-broker-ollama-data

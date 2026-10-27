@@ -47,14 +47,15 @@ func assignCluster(newEmbedding []float32, seeds map[int64][]float32, threshold 
 	return seedID, found
 }
 
-// fetchEmbedding calls Ollama's /api/embeddings for a single text input.
-func fetchEmbedding(ctx context.Context, httpClient *http.Client, ollamaURL, model, text string) ([]float32, error) {
-	reqBody, err := json.Marshal(map[string]string{"model": model, "prompt": text})
+// fetchEmbedding calls llama-server's /embedding for a single text input. The server is started
+// with --embeddings --pooling mean, so the reply holds one pooled vector: [{"embedding":[[...]]}].
+func fetchEmbedding(ctx context.Context, httpClient *http.Client, embedURL, text string) ([]float32, error) {
+	reqBody, err := json.Marshal(map[string]string{"content": text})
 	if err != nil {
 		return nil, fmt.Errorf("marshal embed request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ollamaURL+"/api/embeddings", bytes.NewReader(reqBody))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, embedURL+"/embedding", bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, fmt.Errorf("create embed request: %w", err)
 	}
@@ -70,11 +71,14 @@ func fetchEmbedding(ctx context.Context, httpClient *http.Client, ollamaURL, mod
 		return nil, fmt.Errorf("embed request returned status %d", resp.StatusCode)
 	}
 
-	var parsed struct {
-		Embedding []float32 `json:"embedding"`
+	var parsed []struct {
+		Embedding [][]float32 `json:"embedding"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
 		return nil, fmt.Errorf("decode embed response: %w", err)
 	}
-	return parsed.Embedding, nil
+	if len(parsed) == 0 || len(parsed[0].Embedding) == 0 || len(parsed[0].Embedding[0]) == 0 {
+		return nil, fmt.Errorf("embed response held no vector")
+	}
+	return parsed[0].Embedding[0], nil
 }

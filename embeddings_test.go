@@ -60,19 +60,19 @@ func TestAssignCluster(t *testing.T) {
 
 func TestFetchEmbedding(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/embeddings" {
+		if r.URL.Path != "/embedding" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		var body map[string]string
 		json.NewDecoder(r.Body).Decode(&body)
-		if body["model"] != "nomic-embed-text" || body["prompt"] != "some title" {
+		if body["content"] != "some title" {
 			t.Errorf("unexpected request body: %+v", body)
 		}
-		w.Write([]byte(`{"embedding":[0.1,0.2,0.3]}`))
+		w.Write([]byte(`[{"index":0,"embedding":[[0.1,0.2,0.3]]}]`))
 	}))
 	defer srv.Close()
 
-	emb, err := fetchEmbedding(context.Background(), srv.Client(), srv.URL, "nomic-embed-text", "some title")
+	emb, err := fetchEmbedding(context.Background(), srv.Client(), srv.URL, "some title")
 	if err != nil {
 		t.Fatalf("fetchEmbedding error: %v", err)
 	}
@@ -87,8 +87,19 @@ func TestFetchEmbeddingNon2xx(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := fetchEmbedding(context.Background(), srv.Client(), srv.URL, "nomic-embed-text", "x")
+	_, err := fetchEmbedding(context.Background(), srv.Client(), srv.URL, "x")
 	if err == nil {
 		t.Fatal("expected error on 500, got nil")
+	}
+}
+
+func TestFetchEmbeddingRejectsEmptyVector(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`[{"index":0,"embedding":[]}]`))
+	}))
+	defer srv.Close()
+
+	if _, err := fetchEmbedding(context.Background(), srv.Client(), srv.URL, "x"); err == nil {
+		t.Fatal("expected error when the server returns no vector")
 	}
 }

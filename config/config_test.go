@@ -69,3 +69,30 @@ func TestIsFeedExcluded(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadLLMDefaultsPointAtComposeServices(t *testing.T) {
+	for _, k := range []string{"LLAMA_URL", "LLAMA_EMBED_URL", "LLAMA_MODEL", "LLAMA_TIMEOUT", "LLAMA_MAX_RETRIES", "LLAMA_MAX_TOKENS"} {
+		t.Setenv(k, "")
+	}
+
+	cfg := Load()
+
+	if cfg.LLM.URL != "http://llama-granite:8080" || cfg.LLM.EmbedURL != "http://llama-embed:8081" {
+		t.Fatalf("unexpected default URLs: %+v", cfg.LLM)
+	}
+	if cfg.LLM.Model != "granite-4.2-3b" || cfg.LLM.MaxRetries != 3 || cfg.LLM.MaxTokens != 512 {
+		t.Fatalf("unexpected defaults: %+v", cfg.LLM)
+	}
+}
+
+func TestLoadLLMReadsLlamaEnv(t *testing.T) {
+	t.Setenv("LLAMA_URL", "http://gpu:9000")
+	t.Setenv("LLAMA_EMBED_URL", "http://cpu:9001")
+	t.Setenv("LLAMA_MAX_TOKENS", "256")
+
+	cfg := Load()
+
+	if cfg.LLM.URL != "http://gpu:9000" || cfg.LLM.EmbedURL != "http://cpu:9001" || cfg.LLM.MaxTokens != 256 {
+		t.Fatalf("env not honoured: %+v", cfg.LLM)
+	}
+}

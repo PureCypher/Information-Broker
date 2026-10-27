@@ -15,9 +15,9 @@ import (
 // ClusteringScheduler periodically embeds recent article summaries and
 // assigns them to story clusters, backing the digest feature's cross-feed
 // "important" bucket. It never runs concurrently with active summarization
-// -- see isIdle -- so it doesn't compete for Ollama capacity.
+// -- see isIdle -- so it doesn't compete for LLM capacity.
 //
-// Embeds the Ollama-generated summary, not the raw title: a live threshold
+// Embeds the LLM-generated summary, not the raw title: a live threshold
 // spot-check found title-only embeddings unreliable on this corpus (CVE
 // advisory titles share so much boilerplate -- "... Elevation of Privilege
 // Vulnerability" -- that different vulnerabilities scored MORE similar,
@@ -35,7 +35,7 @@ func NewClusteringScheduler(db *sql.DB, cfg *config.Config, summarizer *Summariz
 	return &ClusteringScheduler{
 		db:         db,
 		config:     cfg,
-		httpClient: &http.Client{Timeout: cfg.OLLAMA.Timeout},
+		httpClient: &http.Client{Timeout: cfg.LLM.Timeout},
 		summarizer: summarizer,
 	}
 }
@@ -126,7 +126,7 @@ func (c *ClusteringScheduler) embedBatch(ctx context.Context) error {
 	}
 
 	for _, it := range toEmbed {
-		emb, err := fetchEmbedding(ctx, c.httpClient, c.config.OLLAMA.URL, c.config.Clustering.EmbedModel, it.summary)
+		emb, err := fetchEmbedding(ctx, c.httpClient, c.config.LLM.EmbedURL, it.summary)
 		if err != nil {
 			log.Printf("Story-clustering: embedding failed for article %d: %v", it.id, err)
 			continue
