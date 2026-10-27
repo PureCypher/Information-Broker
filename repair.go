@@ -23,6 +23,8 @@ var repairBoilerplateMarkers = []string{
 	"Recent Articles",     // securityaffairs.com recent-widget heading
 	"We use cookies",      // cookie-consent banners (securityaffairs, many WP sites)
 	"Share this article",  // techradar.com 2026 share rail (also rapid7, elastic, intel471)
+	"Subscribe to our newsletter", // future plc inline newsletter capture ("Are you a pro? ...")
+	"View Deal",           // future plc hawk affiliate deal cards ("Save up to ... View Deal")
 	"Read more:",          // techrepublic/zdnet/therecord/helpnetsecurity read-more widgets
 }
 
@@ -164,6 +166,8 @@ func runRepair(db *sql.DB, cfg *config.Config, args []string) error {
 			// already what the current extractor produces — leave the row
 			// (and its summary) alone.
 			unchanged++
+			log.Printf("  [%d/%d] id=%d unchanged (fetched %d chars == stored %d)",
+				i+1, len(candidates), r.ID, len(content), len(strings.TrimSpace(r.FullContent)))
 			time.Sleep(1500 * time.Millisecond)
 			continue
 		}

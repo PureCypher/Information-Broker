@@ -711,6 +711,31 @@ func extractMainContent(doc *goquery.Document, title string) (text, bodyHTML str
 		`[data-component-name="Slice:PopularBox"], ` +
 		`[data-component-name="SponsoredScroll"]`).Remove()
 
+	// The same pages also inject a mid-article "You might also like"
+	// recirculation widget straight into the prose: an <a id="elk-you-might-
+	// also-..."> anchor, a <h3 id="section-you-might-also-..."> heading and a
+	// related-links <ul id="elk-<uuid>">. The elk- prefix is Future plc's
+	// server-side injected-block namespace, so this never matches real prose.
+	doc.Find(`a[id^="elk-you-might-also"], ` +
+		`h3[id^="section-you-might-also"], ` +
+		`ul[id^="elk-"]`).Remove()
+
+	// Future plc affiliate cards (hawk framework): the deal-widget root div
+	// carries data-merchant-name, and its rendered text is a shopping CTA
+	// ("Save up to 68% ... View Deal") — never prose. The inline newsletter
+	// capture ("Are you a pro? Subscribe to our newsletter") and the
+	// post-article TOPICS tag nav are equally non-prose chrome.
+	//
+	// Their "Read more" / "Latest in <category>" rivers are <aside
+	// data-mrf-recirculation="article-river-stacked"> blocks inside
+	// <article>; on short stories they carry ~10x the prose's text, so the
+	// "asides are the body" guard below would otherwise keep them.
+	doc.Find(`[data-merchant-name], ` +
+		`[id^="slice-container-newsletterForm"], ` +
+		`.newsletter-inbodyContent-slice, ` +
+		`[data-component-name="PostArticleLinks"], ` +
+		`aside[data-mrf-recirculation]`).Remove()
+
 	// Precise, high-confidence article-body selectors. Within this tier the
 	// longest match wins (a real post body dwarfs a related-post teaser card;
 	// this is the hackread.com fix). ".k5a-article" is theregister.com's
@@ -779,10 +804,27 @@ func extractMainContent(doc *goquery.Document, title string) (text, bodyHTML str
 	// duplicate the title and byline the reading page already renders.
 	// Strip those subtrees after selection; ranking above already happened
 	// on the full text, so this only trims the stored copy.
-	best.Find("header, nav, footer, aside, form, button, " +
+	//
+	// EXCEPT for <aside>: techradar.com's 2026 template wraps the actual
+	// article prose in an <aside> (semantic misuse, but that's where the
+	// body is). Removing every aside there deleted ~86% of the extracted
+	// body (26,779 -> 2,989 chars on a live page). Chrome asides are a
+	// small fraction of the container, so guard: if removing aside would
+	// take more than half the container's text, the asides ARE the body —
+	// keep them.
+	stripChrome := func(sel string) {
+		before := len(best.Text())
+		clone := best.Clone()
+		clone.Find(sel).Remove()
+		if len(clone.Text())*2 >= before {
+			best.Find(sel).Remove()
+		}
+	}
+	best.Find("header, nav, footer, form, button, " +
 		"[x-show], [x-cloak], [hidden], [aria-hidden='true'], " +
 		"[role='toolbar'], [role='menu'], [role='menubar'], [role='navigation'], " +
 		".social-share, .share-buttons, .sharing-links").Remove()
+	stripChrome("aside")
 
 	// A publisher's leading <h1> that repeats the article title duplicates
 	// the headline the reading page already renders (bleepingcomputer puts

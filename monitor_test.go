@@ -339,6 +339,66 @@ func TestExtractMainContentTechradarFuturePlcWidgets(t *testing.T) {
 	}
 }
 
+func TestExtractMainContentTechradarMidBodyRecirculationWidget(t *testing.T) {
+	// Real-world case found live on techradar.com (2026-10): a "You might
+	// also like" recirculation widget is injected mid-article with elk-*
+	// ids — an anchor, a section heading and a related-links <ul> — inside
+	// the prose-bearing <div id="article-body">. Stripping only data-
+	// component-name widgets left it in: the stored body switched from the
+	// story to a shopping list mid-sentence.
+	prose := strings.Repeat("Attackers are exploiting a patched WordPress plugin flaw to hijack administrator sessions. ", 10)
+	html := `<html><body>
+		<article>
+			<div id="article-body" class="text-copy bodyCopy auto">
+				<h2>Attackers hijack admin sessions via patched plugin flaw</h2>
+				<p>` + prose + `</p>
+				<a id="elk-you-might-also-like"></a>
+				<h3 class="article-body__section" id="section-you-might-also-like"><span>You might also like</span></h3>
+				<ul id="elk-5a30070b-608e-4fef-8979-ce3547028430">
+					<li>Take a look at our picks for the <a href="https://www.techradar.com/best/best-malware-removal" target="_blank">best malware removal</a></li>
+					<li><a href="https://www.techradar.com/best/best-vpn">Best VPN services</a></li>
+				</ul>
+				<p>Admins running the plugin on public sites should update immediately.</p>
+				<a id="elk-collectionwidget-f205fc142f513c7f675ed59c688c1943"></a>
+				<div data-link="https://example.com/deal" data-merchant-name="Aura Inc" data-link-text="View Deal">
+					<div class="hawk-deal-widget-main">Save up to 68% on identity theft protection! <a href="https://example.com/deal">View Deal</a></div>
+				</div>
+				<div id="slice-container-newsletterForm-articleInbodyContent-Sq2cyejoE56hb6sXvAaQcZ" class="slice-container newsletter-inbodyContent-slice">
+					<div class="newsletter-form__header">Are you a pro? Subscribe to our newsletter</div>
+				</div>
+			</div>
+			<div data-component-name="PostArticleLinks">
+				<div class="border-b border-b-black border-solid py-2.5">TOPICS</div>
+				<nav><a href="/tag/routers">Routers</a> <a href="/tag/security">Security</a></nav>
+			</div>
+			<aside class="w-full" data-nosnippet data-mrf-recirculation="article-river-stacked">
+				<div class="text-white py-4 px-3 mb-4 bg-[#333] uppercase font-bold custom-header-styles">Latest in Security</div>
+				<div class="grid grid-cols-1 gap-4 mt-4 mb-5"><a href="/latest">More security news</a></div>
+			</aside>
+		</article>
+	</body></html>`
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	got, _ := extractMainContent(doc, "")
+	for _, junk := range []string{"You might also like", "best malware removal", "Best VPN services", "elk-",
+		"View Deal", "identity theft protection", "Subscribe to our newsletter", "TOPICS", "Routers",
+		"Latest in Security", "More security news"} {
+		if strings.Contains(got, junk) {
+			t.Fatalf("recirculation widget %q leaked into extracted content: %.300q", junk, got)
+		}
+	}
+	if !strings.Contains(got, "update immediately") {
+		t.Fatalf("prose after the widget was lost: %.300q", got)
+	}
+	if !strings.Contains(got, "hijack administrator sessions") {
+		t.Fatalf("expected the article prose, got: %.300q", got)
+	}
+}
+
 func TestExtractMainContentDropsDuplicateTitleH1(t *testing.T) {
 	// Real-world cases (2026-10): bleepingcomputer.com embeds the headline
 	// in a plain <div class="article_section"> — outside any <header> — so
