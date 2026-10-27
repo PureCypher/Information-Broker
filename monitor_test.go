@@ -30,7 +30,7 @@ func TestExtractMainContentPrefersLongestArticleMatch(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 
-	got := extractMainContent(doc)
+	got, _ := extractMainContent(doc)
 	if strings.Contains(got, "Fake Interpol") {
 		t.Fatalf("extracted the wrong (short, unrelated) article teaser instead of the main article: %s", got)
 	}
@@ -56,7 +56,7 @@ func TestExtractMainContentPrefersLongerMatchFromLaterSelector(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 
-	got := extractMainContent(doc)
+	got, _ := extractMainContent(doc)
 	if !strings.Contains(got, "real article body") {
 		t.Fatalf("expected the .entry-content text despite <article> matching first in priority order, got: %s", got)
 	}
@@ -81,7 +81,7 @@ func TestExtractMainContentStripsAudioPlayerWidget(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 
-	got := extractMainContent(doc)
+	got, _ := extractMainContent(doc)
 	if strings.Contains(got, "Listen to this article") || strings.Contains(got, "Voice") {
 		t.Fatalf("audio-player widget text leaked into extracted content: %s", got)
 	}
@@ -108,7 +108,7 @@ func TestExtractMainContentStripsScriptAndStyleTags(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 
-	got := extractMainContent(doc)
+	got, _ := extractMainContent(doc)
 	if strings.Contains(got, "margin:0") || strings.Contains(got, "console.log") {
 		t.Fatalf("script/style raw text leaked into extracted content: %s", got)
 	}
@@ -142,7 +142,7 @@ func TestExtractMainContentFindsPageContentWrapper(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 
-	got := extractMainContent(doc)
+	got, _ := extractMainContent(doc)
 	if strings.Contains(got, "CVE ID, Product, Vendor") || strings.Contains(got, "Pricing") {
 		t.Fatalf("header/nav chrome leaked into extracted content: %s", got)
 	}
@@ -157,7 +157,7 @@ func TestExtractMainContentFallsBackToBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	got := extractMainContent(doc)
+	got, _ := extractMainContent(doc)
 	if !strings.Contains(got, "Just some plain body text") {
 		t.Fatalf("expected body fallback text, got: %s", got)
 	}
@@ -188,11 +188,50 @@ func TestExtractMainContentTheRegisterK5aArticle(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 
-	got := extractMainContent(doc)
+	got, _ := extractMainContent(doc)
 	if !strings.Contains(got, "GPT-5.6 has deleted users' files") {
 		t.Fatalf("did not extract the k5a-article body; got %d chars: %.120q", len(got), got)
 	}
 	if strings.Contains(got, "RAMpocalypse") {
 		t.Fatalf("extracted a teaser card instead of the article body: %.120q", got)
+	}
+}
+
+func TestExtractMainContentStripsEmbeddedHeaderChrome(t *testing.T) {
+	// Live on arstechnica.com: the real <article> opens with its own
+	// <header> — kicker, headline, byline, publish date, category icon —
+	// all inside the container the longest-match rule selects. The stored
+	// article HTML must not duplicate the title the page shell already
+	// renders, so the embedded header subtree is stripped at capture time.
+	html := `<html><body>
+		<article class="h-entry post-1">
+			<header>
+				<div class="upper-deck"><span>SECURITY</span></div>
+				<h1>Ransomware Group Weaponizes VPN Zero-Day</h1>
+				<div class="byline">By Jane Doe | Oct 27, 2026</div>
+			</header>
+			<p>` + strings.Repeat("The genuine article body prose about the intrusion. ", 25) + `</p>
+		</article>
+	</body></html>`
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	text, bodyHTML := extractMainContent(doc)
+	for _, chrome := range []string{"Ransomware Group Weaponizes VPN Zero-Day", "By Jane Doe", "SECURITY"} {
+		if strings.Contains(text, chrome) {
+			t.Fatalf("text kept embedded-header chrome %q: %s", chrome, text[:min(200, len(text))])
+		}
+		if strings.Contains(bodyHTML, chrome) {
+			t.Fatalf("bodyHTML kept embedded-header chrome %q: %s", chrome, bodyHTML[:min(300, len(bodyHTML))])
+		}
+	}
+	if !strings.Contains(text, "genuine article body prose") {
+		t.Fatalf("article body text lost: %s", text)
+	}
+	if !strings.Contains(bodyHTML, "genuine article body prose") {
+		t.Fatalf("article body HTML lost: %s", bodyHTML)
 	}
 }

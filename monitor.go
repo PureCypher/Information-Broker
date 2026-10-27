@@ -730,6 +730,17 @@ func extractMainContent(doc *goquery.Document) (text, bodyHTML string) {
 		best = doc.Find("body").First()
 	}
 
+	// The article container's own header/nav/footer chrome is not prose:
+	// Ars Technica's <article> embeds the full headline block (title, kicker,
+	// byline, date, category icon) inside <header>, so the stored HTML would
+	// duplicate the title and byline the reading page already renders.
+	// Strip those subtrees after selection; ranking above already happened
+	// on the full text, so this only trims the stored copy.
+	best.Find("header, nav, footer, aside, form, button, "+
+		"[x-show], [x-cloak], [hidden], [aria-hidden='true'], "+
+		"[role='toolbar'], [role='menu'], [role='menubar'], [role='navigation'], "+
+		".social-share, .share-buttons, .sharing-links").Remove()
+
 	text = strings.TrimSpace(best.Text())
 	bodyHTML, _ = goquery.OuterHtml(best)
 	// Only structural content (more than a bare paragraph or two) is worth
