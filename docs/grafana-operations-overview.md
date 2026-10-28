@@ -40,18 +40,22 @@ Either in the Grafana UI: *Dashboards → New → Import*, upload
 `grafana/dashboards/information-broker-ops.json`, and pick the data source for the
 receiving Prometheus.
 
-Or run the importer (the data source already exists, so `PROMETHEUS_URL` is not
-needed and the dashboard keeps its own data source picker):
+Or run the importer. `DATASOURCE_NAME` is the existing Prometheus data source
+(it must exist) and is pre-selected in the dashboard:
 
 ```bash
 GRAFANA_URL=http://192.168.0.250:3000 \
 GRAFANA_TOKEN=<service account token with Editor role> \
+DATASOURCE_NAME=Prometheus \
 python3 grafana/import-dashboard.py
 ```
 
 Create the token under *Administration → Users and access → Service accounts*.
-The script sends it only as a Bearer header and never prints it. Set
-`PROMETHEUS_URL` as well only if you want the script to create a data source.
+If you have no token, `GRAFANA_USER` and `GRAFANA_PASSWORD` use basic auth instead
+(a token wins when both are set). Credentials are sent only in the Authorization
+header and never printed. Set `PROMETHEUS_URL` as well only if you want the script
+to create the data source when it is missing. The importer's tests run with
+`python3 -m unittest discover -s grafana`.
 
 ## Using it
 
