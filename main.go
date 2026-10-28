@@ -92,6 +92,10 @@ func main() {
 		log.Fatalf("Failed to load feeds: %v", err)
 	}
 	log.Printf("Loaded %d RSS feeds", len(feeds))
+	if !cfg.Discord.SilentUntil.IsZero() {
+		log.Printf("Discord silent onboarding: feeds %v until %s (matching articles ingested before then are stored as already posted)",
+			cfg.Discord.SilentFeeds, cfg.Discord.SilentUntil.UTC().Format(time.RFC3339))
+	}
 
 	// Create circuit breaker manager
 	circuitBreakers := NewCircuitBreakerManager()

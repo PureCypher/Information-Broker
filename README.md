@@ -261,6 +261,20 @@ docker compose restart rss-monitor
 
 The system includes 47 pre-configured cybersecurity and technology feeds covering major news sources, security publications, and threat intelligence feeds.
 
+#### Adding a feed without flooding Discord
+
+A new feed's existing items are ingested on first sight and, once summarized, would all be posted to Discord. To import a backlog silently, set these in `.env` **before** restarting with the new feeds:
+
+```bash
+# URL substrings of the new feeds, and an RFC3339 deadline a little after the restart
+DISCORD_SILENT_FEEDS=aikido.dev,bishopfox.com
+DISCORD_SILENT_UNTIL=2026-10-29T12:00:00Z
+# A big backlog can overflow the 100-slot summary queue; raise it for the import
+SUMMARIZATION_MAX_QUEUE_SIZE=300
+```
+
+Until the deadline, matching articles are stored with `posted_to_discord = TRUE` (the startup log prints the window), so they are summarized but never announced. After the deadline, new articles from those feeds post normally. A malformed `DISCORD_SILENT_UNTIL` stops startup instead of silently disabling the window. Remove the variables once the import is done.
+
 ### Article Filtering and Chronological Processing
 
 The system includes intelligent article filtering with two complementary mechanisms to control which articles are processed:

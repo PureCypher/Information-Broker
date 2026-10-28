@@ -39,6 +39,10 @@ type Article struct {
 	FetchDuration time.Duration `json:"fetch_duration"`
 	FeedURL       string        `json:"feed_url"`
 	ContentHash   string        `json:"content_hash"`
+	// PostedToDiscord is stored as-is on insert. True marks an article as
+	// already announced so the summarizer skips Discord for it (silent feed
+	// onboarding); never serialized.
+	PostedToDiscord bool `json:"-"`
 }
 
 // looksLikeHTML reports whether s carries markup rather than plain text.
@@ -688,6 +692,13 @@ func (m *RSSMonitor) processArticle(item *gofeed.Item, feedURL string) bool {
 	// Generate content hash for deduplication
 	article.ContentHash = m.generateContentHash(article.Title, article.URL, article.Content)
 
+	// Silent onboarding: a feed's existing backlog is stored already marked as
+	// posted so adding the feed does not flood Discord (see DiscordConfig).
+	article.PostedToDiscord = m.config.Discord.IsSilentOnboarding(feedURL, time.Now())
+	if article.PostedToDiscord {
+		log.Printf("Silent onboarding: storing as already posted to Discord: %s", article.Title)
+	}
+
 	// Save to database
 	if err := m.saveArticle(article); err != nil {
 		log.Printf("Failed to save article %s: %v", article.URL, err)
@@ -1190,7 +1201,7 @@ func (m *RSSMonitor) generateContentHash(title, url, content string) string {
 func (m *RSSMonitor) saveArticle(article Article) error {
 	query := `
 		INSERT INTO articles (title, url, full_content, content_html, publish_date, fetch_duration_ms, feed_url, content_hash, fetch_time, posted_to_discord)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), FALSE)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9)
 		ON CONFLICT (url) DO NOTHING`
 
 	// Strip any invalid UTF-8 before insert: a single bad byte makes PostgreSQL
@@ -1205,6 +1216,7 @@ func (m *RSSMonitor) saveArticle(article Article) error {
 		article.FetchDuration.Milliseconds(),
 		sanitizeUTF8(article.FeedURL),
 		article.ContentHash,
+		article.PostedToDiscord,
 	)
 
 	return err

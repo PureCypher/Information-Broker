@@ -69,11 +69,21 @@ services:
       LLAMA_MAX_RETRIES: ${LLAMA_MAX_RETRIES:-3}
       LLAMA_MAX_TOKENS: ${LLAMA_MAX_TOKENS:-512}
       
+      # Summarization queue capacity. A burst larger than this (e.g. onboarding a big
+      # feed) overflows into 'summary unavailable' placeholders, so raise it first.
+      SUMMARIZATION_MAX_QUEUE_SIZE: ${SUMMARIZATION_MAX_QUEUE_SIZE:-100}
+
       # Discord Configuration
       DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL:-}
       DISCORD_WEBHOOK_URLS: ${DISCORD_WEBHOOK_URLS:-}
       # Comma-separated feed-URL substrings to suppress from Discord (still stored/summarized).
       DISCORD_EXCLUDED_FEEDS: ${DISCORD_EXCLUDED_FEEDS:-cvefeed.io,exploit-db.com}
+      # Temporary, for onboarding new feeds without flooding Discord: articles from feeds
+      # matching DISCORD_SILENT_FEEDS (comma-separated URL substrings) that are ingested before
+      # DISCORD_SILENT_UNTIL (RFC3339, e.g. 2026-10-29T12:00:00Z) are stored as already posted.
+      # A malformed DISCORD_SILENT_UNTIL stops startup rather than silently disabling this.
+      DISCORD_SILENT_FEEDS: ${DISCORD_SILENT_FEEDS:-}
+      DISCORD_SILENT_UNTIL: ${DISCORD_SILENT_UNTIL:-}
       DISCORD_MAX_RETRIES: ${DISCORD_MAX_RETRIES:-2}
       DISCORD_TIMEOUT: ${DISCORD_TIMEOUT:-30s}
       

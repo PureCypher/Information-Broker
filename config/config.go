@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -72,8 +73,16 @@ type DiscordConfig struct {
 	WebhookURL    string   // Deprecated: Use WebhookURLs for multiple webhooks
 	WebhookURLs   []string // Multiple webhook URLs for multi-cast notifications
 	ExcludedFeeds []string // Feed-URL substrings whose articles are never posted to Discord
-	MaxRetries    int
-	Timeout       time.Duration
+	// SilentFeeds and SilentUntil onboard new feeds without flooding Discord:
+	// while the clock is before SilentUntil, articles newly ingested from a feed
+	// matching one of the SilentFeeds substrings are stored already marked as
+	// posted, so the summarizer never announces them. A zero SilentUntil turns
+	// the feature off. Unlike ExcludedFeeds this is temporary: once the window
+	// ends, new articles from those feeds post as usual.
+	SilentFeeds []string
+	SilentUntil time.Time
+	MaxRetries  int
+	Timeout     time.Duration
 }
 
 // PrometheusConfig holds Prometheus metrics configuration
@@ -127,6 +136,13 @@ type ClusteringConfig struct {
 
 // Load loads configuration from environment variables
 func Load() *Config {
+	// Strict on purpose: a typo here must stop startup, not silently disable
+	// the silent window and let a whole feed backlog post to Discord.
+	silentUntil, err := ParseSilentUntil(os.Getenv("DISCORD_SILENT_UNTIL"))
+	if err != nil {
+		log.Fatalf("invalid configuration: %v", err)
+	}
+
 	return &Config{
 		Database: DatabaseConfig{
 			Host:     getEnv("DB_HOST", "localhost"),
@@ -163,6 +179,8 @@ func Load() *Config {
 			WebhookURL:    getEnv("DISCORD_WEBHOOK_URL", ""),
 			WebhookURLs:   getEnvStringSlice("DISCORD_WEBHOOK_URLS", []string{}),
 			ExcludedFeeds: getEnvStringSlice("DISCORD_EXCLUDED_FEEDS", []string{}),
+			SilentFeeds:   getEnvStringSlice("DISCORD_SILENT_FEEDS", []string{}),
+			SilentUntil:   silentUntil,
 			MaxRetries:    getEnvInt("DISCORD_MAX_RETRIES", 2),
 			Timeout:       getEnvDuration("DISCORD_TIMEOUT", 30*time.Second),
 		},
@@ -287,22 +305,54 @@ func (d *DiscordConfig) GetWebhookURLs() []string {
 	return []string{}
 }
 
-// IsFeedExcluded reports whether articles from the given feed URL should be
-// suppressed from Discord notifications. Matching is a case-insensitive
-// substring test against each configured exclusion entry, so an entry like
-// "cvefeed.io" matches "https://cvefeed.io/rssfeed/latest.xml".
-func (d *DiscordConfig) IsFeedExcluded(feedURL string) bool {
-	if feedURL == "" || len(d.ExcludedFeeds) == 0 {
+// matchesFeed reports whether feedURL contains any entry of patterns, ignoring
+// case and surrounding whitespace. Blank entries never match.
+func matchesFeed(feedURL string, patterns []string) bool {
+	if feedURL == "" || len(patterns) == 0 {
 		return false
 	}
 	haystack := strings.ToLower(feedURL)
-	for _, excluded := range d.ExcludedFeeds {
-		needle := strings.ToLower(strings.TrimSpace(excluded))
+	for _, p := range patterns {
+		needle := strings.ToLower(strings.TrimSpace(p))
 		if needle != "" && strings.Contains(haystack, needle) {
 			return true
 		}
 	}
 	return false
+}
+
+// IsFeedExcluded reports whether articles from the given feed URL should be
+// suppressed from Discord notifications. Matching is a case-insensitive
+// substring test against each configured exclusion entry, so an entry like
+// "cvefeed.io" matches "https://cvefeed.io/rssfeed/latest.xml".
+func (d *DiscordConfig) IsFeedExcluded(feedURL string) bool {
+	return matchesFeed(feedURL, d.ExcludedFeeds)
+}
+
+// IsSilentOnboarding reports whether an article from feedURL, ingested at now,
+// must be stored as already posted to Discord. It is true only for a matching
+// feed strictly before SilentUntil; it keys on ingest time rather than the
+// article's publish date, which feeds routinely get wrong (future-dated or
+// date-only stamps would otherwise slip through and post).
+func (d *DiscordConfig) IsSilentOnboarding(feedURL string, now time.Time) bool {
+	if d.SilentUntil.IsZero() || !now.Before(d.SilentUntil) {
+		return false
+	}
+	return matchesFeed(feedURL, d.SilentFeeds)
+}
+
+// ParseSilentUntil parses the DISCORD_SILENT_UNTIL value. Empty means off.
+// Only RFC3339 is accepted: a date-only value would be an ambiguous midnight.
+func ParseSilentUntil(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, nil
+	}
+	t, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("DISCORD_SILENT_UNTIL %q is not RFC3339 (for example 2026-10-29T12:00:00Z): %w", value, err)
+	}
+	return t, nil
 }
 
 // GetConnectionString returns the database connection string
