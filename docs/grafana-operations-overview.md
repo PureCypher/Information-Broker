@@ -15,45 +15,43 @@ time series, table).
 
 ## Setting it up
 
-### 1. Let Grafana reach Prometheus
+### 1. Metrics reach your Prometheus by remote write
 
-Prometheus listens on `127.0.0.1` by default. Set the interface in `.env` to this
-host's LAN address and recreate it:
+The local Prometheus keeps scraping the app and forwards the samples to the
+Prometheus behind your Grafana (`remote_write` in `prometheus.yml`, currently
+`http://192.168.0.250:9090/api/v1/write`). Nothing connects *into* this host, and
+the local Prometheus stays loopback-only.
 
-```bash
-# .env
-PROMETHEUS_BIND=192.168.1.135
+The receiving Prometheus must be started with `--web.enable-remote-write-receiver`
+and have a clock within a few seconds of this host. Only series with
+`job="information-broker-metrics"` plus the alert state (`ALERTS`,
+`ALERTS_FOR_STATE`) are forwarded, so the receiving server's own metrics are never
+touched. Forwarding starts when it is enabled; earlier history stays in the local
+Prometheus.
 
-docker compose up -d prometheus
-curl http://192.168.1.135:9090/-/healthy      # from the Grafana host: should print "Prometheus ... is Healthy."
-```
+Check it: on the receiving Prometheus, `up{job="information-broker-metrics"}`
+should be `1`; on this host, `prometheus_remote_storage_samples_failed_total`
+should stay at `0`. To send somewhere else, change the `url` in `prometheus.yml`
+and recreate Prometheus (`docker compose up -d prometheus`).
 
-Prometheus has **no authentication**. Bind it to a LAN address only, never to a
-public interface. Metric history is kept in the `prometheus_data` volume, so
-recreating the container loses nothing. Binding to one address replaces the
-loopback binding, so on the host itself use that address too
-(`curl http://192.168.1.135:9090/api/v1/query ...`, not `127.0.0.1`).
+### 2. Import the dashboard
 
-### 2. Add the data source and import the dashboard
+Either in the Grafana UI: *Dashboards → New → Import*, upload
+`grafana/dashboards/information-broker-ops.json`, and pick the data source for the
+receiving Prometheus.
 
-Either do it in the Grafana UI:
-
-1. *Connections → Data sources → Add data source → Prometheus*, URL
-   `http://192.168.1.135:9090` (the address your Grafana **server** uses), *Save & test*.
-2. *Dashboards → New → Import*, upload `grafana/dashboards/information-broker-ops.json`,
-   and pick the data source.
-
-Or run the importer, which does both and can be re-run to update the dashboard:
+Or run the importer (the data source already exists, so `PROMETHEUS_URL` is not
+needed and the dashboard keeps its own data source picker):
 
 ```bash
 GRAFANA_URL=http://192.168.0.250:3000 \
 GRAFANA_TOKEN=<service account token with Editor role> \
-PROMETHEUS_URL=http://192.168.1.135:9090 \
 python3 grafana/import-dashboard.py
 ```
 
 Create the token under *Administration → Users and access → Service accounts*.
-The script sends it only as a Bearer header and never prints it.
+The script sends it only as a Bearer header and never prints it. Set
+`PROMETHEUS_URL` as well only if you want the script to create a data source.
 
 ## Using it
 
@@ -74,7 +72,7 @@ series; gray is context. Lines are 2 px with a light area wash.
 | Tile | Shows | Source |
 |---|---|---|
 | Service | ▲ UP / ▼ DOWN: whether Prometheus can scrape the service | `up{job="information-broker-metrics"}` |
-| Alerts firing | Prometheus alerts currently firing (✓ None when clear) | `ALERTS` (rules in `prometheus/rules`) |
+| Alerts firing | Prometheus alerts currently firing (✓ None when clear) | `ALERTS` (rules in `prometheus/rules`, evaluated locally and forwarded) |
 | Articles stored | Total articles in the database | `articles_in_database` |
 | New articles | Articles first seen in the selected range | `new_articles_found_total` |
 | Fetch success | Share of RSS fetches that succeeded | `rss_fetch_total` |

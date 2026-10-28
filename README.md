@@ -135,7 +135,7 @@ After successful deployment, access these services:
 | **Application API** | http://localhost:8080 | Health checks, statistics, manual triggers |
 | **Health Check** | http://localhost:8080/health | Service health status |
 | **Prometheus** | http://localhost:9090 | Metrics collection and querying |
-| **Grafana** | your own server | Add Prometheus (`http://<host>:9090`) as a data source and import the dashboard; see [docs/grafana-operations-overview.md](docs/grafana-operations-overview.md) |
+| **Grafana** | your own server | Receives metrics from Prometheus via `remote_write`; import the dashboard, see [docs/grafana-operations-overview.md](docs/grafana-operations-overview.md) |
 | **PostgreSQL** | localhost:5432 | Database access (postgres/postgres) |
 
 ## Security Setup
@@ -229,7 +229,6 @@ HTTP_WRITE_TIMEOUT=15s             # HTTP client write timeout
 ```bash
 PROMETHEUS_PORT=9090               # Prometheus server port
 PROMETHEUS_RETENTION=90d           # Metrics retention period
-PROMETHEUS_BIND=127.0.0.1          # Prometheus listen address (a LAN IP lets an external Grafana connect)
 ```
 
 ## Usage
@@ -413,11 +412,10 @@ make health
 
 ### Grafana Dashboard
 
-This repo does not run Grafana. Point your own Grafana at Prometheus and import the dashboard:
+This repo does not run Grafana. Prometheus forwards this service's metrics with `remote_write` (see `prometheus.yml`) to the Prometheus behind your own Grafana, which must run with `--web.enable-remote-write-receiver`. Then import the dashboard:
 
-1. Set `PROMETHEUS_BIND` in `.env` to this host's LAN IP and restart Prometheus (`docker compose up -d prometheus`)
-2. In Grafana, add a Prometheus data source with URL `http://<host>:9090`
-3. Import `grafana/dashboards/information-broker-ops.json` (or run `python3 grafana/import-dashboard.py`)
+1. Check forwarding: on the receiving Prometheus, `up{job="information-broker-metrics"}` should be `1`
+2. Import `grafana/dashboards/information-broker-ops.json` and choose that Prometheus as the data source (or run `python3 grafana/import-dashboard.py`)
 
 Panels, thresholds and setup details: [docs/grafana-operations-overview.md](docs/grafana-operations-overview.md).
 

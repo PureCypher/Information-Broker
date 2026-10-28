@@ -5,6 +5,20 @@ global:
 rule_files:
   - "/etc/prometheus/rules/content_volume_rules.yml"
 
+# Forward this service's metrics to the Prometheus behind the external Grafana
+# (192.168.0.250). That server must run with --web.enable-remote-write-receiver.
+# Only this service's series and the alert state are sent: this Prometheus also
+# scrapes itself (job="prometheus", instance="localhost:9090"), and forwarding
+# those would collide with the receiving server's own identical series.
+remote_write:
+  - url: http://192.168.0.250:9090/api/v1/write
+    name: external-grafana
+    write_relabel_configs:
+      - source_labels: [job, __name__]
+        separator: ";"
+        regex: "information-broker-metrics;.*|.*;ALERTS(_FOR_STATE)?"
+        action: keep
+
 scrape_configs:
   - job_name: 'prometheus'
     static_configs:

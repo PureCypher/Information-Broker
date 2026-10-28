@@ -152,11 +152,10 @@ services:
     image: prom/prometheus:v3.5.5
     container_name: information-broker-prometheus
     ports:
-      # Local-only by default. Set PROMETHEUS_BIND to this host's LAN IP so an
-      # external Grafana can use Prometheus as a data source (it has no auth).
-      - "${PROMETHEUS_BIND:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090"
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/rules:/etc/prometheus/rules:ro
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'

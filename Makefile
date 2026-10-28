@@ -91,7 +91,7 @@ prometheus:
 monitoring:
 	@echo "Starting monitoring stack..."
 	docker compose up -d prometheus
-	@echo "Prometheus: http://localhost:9090 (set PROMETHEUS_BIND to let an external Grafana connect)"
+	@echo "Prometheus: http://localhost:9090"
 
 # Database management
 clear-db:
