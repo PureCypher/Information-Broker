@@ -19,13 +19,15 @@ import (
 // re-extracted text actually differs, so a false-positive marker costs one
 // re-fetch and no data change.
 var repairBoilerplateMarkers = []string{
-	"You might also like", // securityaffairs.com related-posts heading
-	"Recent Articles",     // securityaffairs.com recent-widget heading
-	"We use cookies",      // cookie-consent banners (securityaffairs, many WP sites)
-	"Share this article",  // techradar.com 2026 share rail (also rapid7, elastic, intel471)
+	"You might also like",         // securityaffairs.com related-posts heading
+	"Recent Articles",             // securityaffairs.com recent-widget heading
+	"We use cookies",              // cookie-consent banners (securityaffairs, many WP sites)
+	"Share this article",          // techradar.com 2026 share rail (also rapid7, elastic, intel471)
 	"Subscribe to our newsletter", // future plc inline newsletter capture ("Are you a pro? ..."); also csoonline/IDG JS-rendered email-capture tail
-	"View Deal",           // future plc hawk affiliate deal cards ("Save up to ... View Deal")
-	"Read more:",          // techrepublic/zdnet/therecord/helpnetsecurity read-more widgets
+	"View Deal",                   // future plc hawk affiliate deal cards ("Save up to ... View Deal")
+	"Read more:",                  // techrepublic/zdnet/therecord/helpnetsecurity read-more widgets
+	"Follow me on Twitter",        // securityaffairs.com standing author-signature footer
+	"Pierluigi Paganini",          // securityaffairs.com signature byline (also matches mid-prose quotes; re-extraction is a no-op for those rows)
 }
 
 type repairRow struct {

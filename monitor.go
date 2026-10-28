@@ -906,6 +906,27 @@ func extractMainContent(doc *goquery.Document, title string) (text, bodyHTML str
 		}
 	})
 
+	// securityaffairs.com signs every article with a standing footer inside
+	// .article-details-block: a "Follow me on Twitter: ..." paragraph, the
+	// author's name as a bare link paragraph and the "(SecurityAffairs –
+	// <topics>)" line, then a .social-media share row. All chrome — the
+	// reading page renders the author itself and the share row's link soup
+	// ("facebook / linkedin / twitter") read as article text. Match the
+	// signature paragraphs by whole-paragraph text, not class: wp-block-
+	// paragraph is generic Gutenberg markup and the site's real prose uses it.
+	best.Find("p").Each(func(_ int, s *goquery.Selection) {
+		t := strings.ToLower(norm(s.Text()))
+		if t == "" {
+			return
+		}
+		if strings.HasPrefix(t, "follow me on twitter") ||
+			t == "pierluigi paganini" ||
+			strings.HasPrefix(t, "(securityaffairs") {
+			s.Remove()
+		}
+	})
+	best.Find(".social-media").Remove()
+
 	// A publisher's leading <h1> that repeats the article title duplicates
 	// the headline the reading page already renders (bleepingcomputer puts
 	// the h1+byline block in a plain <div class="article_section"> outside

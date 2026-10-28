@@ -86,6 +86,24 @@ func TestSelectRepairCandidatesCaseInsensitiveMarkers(t *testing.T) {
 	}
 }
 
+func TestSelectRepairCandidatesSignatureMarkers(t *testing.T) {
+	// securityaffairs.com rows repaired before the signature-footer fix
+	// still end with the standing author signature; the two new markers
+	// must select them. The name marker also matches mid-prose mentions —
+	// those rows cost one re-fetch and come back unchanged, so selecting
+	// them is acceptable; a truly clean row stays untouched.
+	rows := []repairRow{
+		{ID: 1, URL: "https://securityaffairs.com/a", FullContent: "Real body.\n\nPierluigi Paganini\n\nfacebook\nlinkedin\ntwitter"},
+		{ID: 2, URL: "https://securityaffairs.com/b", FullContent: "Real body.\n\nFollow me on Twitter: @securityaffairs"},
+		{ID: 3, URL: "https://securityaffairs.com/c", FullContent: "Researchers interviewed Pierluigi Paganini about the campaign."},
+		{ID: 4, URL: "https://securityaffairs.com/d", FullContent: "Clean body."},
+	}
+	got := selectRepairCandidates(rows, false, 0)
+	if len(got) != 3 || got[0].ID != 1 || got[1].ID != 2 || got[2].ID != 3 {
+		t.Fatalf("expected signature rows 1, 2 and the prose mention 3, got %+v", got)
+	}
+}
+
 func TestParseRepairArgsFlagsAfterPositional(t *testing.T) {
 	// Go's flag package stops at the first positional argument, so
 	// `repair securityaffairs.com --dry-run` silently ignored the flag and

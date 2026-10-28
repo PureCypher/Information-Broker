@@ -289,6 +289,45 @@ func TestExtractMainContentSecurityAffairsArticleDetailsBlock(t *testing.T) {
 	}
 }
 
+func TestExtractMainContentSecurityAffairsSignatureFooter(t *testing.T) {
+	// securityaffairs.com row 90330 (post-201840 fix): every article ends
+	// with a standing author signature inside .article-details-block — a
+	// "Follow me on Twitter: ..." paragraph, the author's name as a bare
+	// link paragraph, the "(SecurityAffairs – <topics>)" line and a
+	// .social-media share row ("facebook linkedin twitter"). These are
+	// chrome: the reading page renders the author itself, and the share-row
+	// link soup read as article text (stored tails ended with "facebook
+	// linkedin twitter"). Class removals can't catch the signature
+	// paragraphs (wp-block-paragraph is generic Gutenberg markup), so they
+	// are matched by whole-paragraph text.
+	body := strings.Repeat("CISA added the PHP flaws PHP2Shell to its Known Exploited Vulnerabilities catalog. ", 20)
+	html := `<html><body>
+		<div class="article-details-block">
+			<h2>U.S. CISA adds PHP flaws PHP2Shell to its KEV catalog</h2>
+			<p>` + body + `</p>
+			<p>Follow me on Twitter: <a href="https://twitter.com/securityaffairs">@securityaffairs</a> and <a href="https://www.facebook.com/secaffairs">Facebook</a></p>
+			<p><a href="/author/paganinip">Pierluigi Paganini</a></p>
+			<p>(SecurityAffairs – hacking, CISA)</p>
+			<div class="social-media"><a href="#">facebook</a> <a href="#">linkedin</a> <a href="#">twitter</a></div>
+		</div>
+	</body></html>`
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	got, _ := extractMainContent(doc, "")
+	for _, marker := range []string{"Follow me on Twitter", "Pierluigi Paganini", "SecurityAffairs", "facebook", "linkedin", "twitter"} {
+		if strings.Contains(got, marker) {
+			t.Fatalf("signature footer leaked into extracted content (%s): %.200q", marker, got)
+		}
+	}
+	if !strings.Contains(got, "Known Exploited Vulnerabilities catalog") {
+		t.Fatalf("article body lost: %.200q", got)
+	}
+}
+
 func TestExtractMainContentTechradarFuturePlcWidgets(t *testing.T) {
 	// Real-world case found live on techradar.com (2026 template, article
 	// id 90215): the prose paragraphs sit directly inside <article>, which
