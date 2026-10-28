@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 // APIServer provides HTTP endpoints for accessing article data
@@ -116,10 +118,41 @@ type ArticleView struct {
 	FetchTime *time.Time `json:"fetch_time,omitempty"`
 }
 
+// maxFeedFilters bounds how many sources one /articles request may combine.
+const maxFeedFilters = 25
+
+var errTooManyFeedFilters = fmt.Errorf("too many feed filters (max %d)", maxFeedFilters)
+
+// normalizeFeedFilters cleans the repeatable ?feed= values: trims whitespace,
+// drops empties (the legacy "All sources" submit sends feed=), dedupes
+// preserving first-seen order, and rejects more than maxFeedFilters distinct
+// feeds. The cap applies after dedupe.
+func normalizeFeedFilters(values []string) ([]string, error) {
+	var out []string
+	seen := make(map[string]struct{}, len(values))
+	for _, v := range values {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		if _, dup := seen[v]; dup {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
+	}
+	if len(out) > maxFeedFilters {
+		return nil, errTooManyFeedFilters
+	}
+	return out, nil
+}
+
 // buildArticlesWhere returns the WHERE clause ("" when no filters) with its
 // ordered placeholder args; nextIdx is the next free placeholder number so
-// callers can append more parameters without renumbering.
-func buildArticlesWhere(feed, q string) (string, []interface{}, int) {
+// callers can append more parameters without renumbering. feeds must already
+// be normalized (normalizeFeedFilters): one feed keeps plain equality, two or
+// more match any of them (OR).
+func buildArticlesWhere(feeds []string, q string) (string, []interface{}, int) {
 	q = strings.TrimSpace(q)
 	if len(q) < 2 {
 		q = "" // ignore empty/too-short searches to avoid full-table ILIKE scans
@@ -127,9 +160,15 @@ func buildArticlesWhere(feed, q string) (string, []interface{}, int) {
 	var conds []string
 	var args []interface{}
 	i := 1
-	if feed != "" {
+	switch len(feeds) {
+	case 0:
+	case 1:
 		conds = append(conds, fmt.Sprintf("feed_url = $%d", i))
-		args = append(args, feed)
+		args = append(args, feeds[0])
+		i++
+	default:
+		conds = append(conds, fmt.Sprintf("feed_url = ANY($%d)", i))
+		args = append(args, pq.Array(feeds))
 		i++
 	}
 	if q != "" {
@@ -145,9 +184,9 @@ func buildArticlesWhere(feed, q string) (string, []interface{}, int) {
 }
 
 // buildArticlesQuery constructs the SQL and ordered args for listing articles,
-// applying optional feed and case-insensitive search (q) filters, with optional sort order.
-func buildArticlesQuery(feed, q, sort string, limit, offset int) (string, []interface{}) {
-	where, args, i := buildArticlesWhere(feed, q)
+// applying optional feed (one or several) and case-insensitive search (q) filters, with optional sort order.
+func buildArticlesQuery(feeds []string, q, sort string, limit, offset int) (string, []interface{}) {
+	where, args, i := buildArticlesWhere(feeds, q)
 	query := `SELECT id, title, url, summary, full_content, publish_date, fetch_duration_ms, feed_url, content_hash
 		FROM articles`
 	if where != "" {
@@ -191,6 +230,14 @@ func (s *APIServer) getArticles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate the feed filters first: a bad request must be rejected before
+	// any database access.
+	feedURLs, err := normalizeFeedFilters(r.URL.Query()["feed"])
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	// Parse query parameters
 	limit := 50 // default
 	offset := 0 // default
@@ -207,15 +254,14 @@ func (s *APIServer) getArticles(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	feedURL := r.URL.Query().Get("feed")
 	searchQ := r.URL.Query().Get("q")
 
-	query, args := buildArticlesQuery(feedURL, searchQ, r.URL.Query().Get("sort"), limit, offset)
+	query, args := buildArticlesQuery(feedURLs, searchQ, r.URL.Query().Get("sort"), limit, offset)
 
 	// Total matching rows for honest pagination ("PAGE 2 OF 7"); the count
 	// mirrors the listing's WHERE clause exactly. Non-fatal on error — the
 	// listing still works, the total is just absent from the response.
-	where, countArgs, _ := buildArticlesWhere(feedURL, searchQ)
+	where, countArgs, _ := buildArticlesWhere(feedURLs, searchQ)
 	countQuery := "SELECT COUNT(*) FROM articles"
 	if where != "" {
 		countQuery += " WHERE " + where

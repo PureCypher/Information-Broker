@@ -41,18 +41,19 @@ func ptr(s string) *string { return &s }
 func TestBuildArticlesWhereMatchesQuery(t *testing.T) {
 	cases := []struct {
 		name       string
-		feed, q    string
+		feeds      []string
+		q          string
 		wantSubstr []string
 		wantArgs   int
 	}{
-		{"no filters", "", "", []string{""}, 0},
-		{"feed only", "https://example.com/rss", "", []string{"feed_url = $1"}, 1},
-		{"search only", "", "ransomware", []string{"title ILIKE $1", "summary ILIKE $2", "full_content ILIKE $3"}, 3},
-		{"feed and search", "https://example.com/rss", "cve", []string{"feed_url = $1", "title ILIKE $2", "summary ILIKE $3", "full_content ILIKE $4"}, 4},
-		{"short search ignored", "", "a", []string{""}, 0},
+		{"no filters", nil, "", []string{""}, 0},
+		{"feed only", []string{"https://example.com/rss"}, "", []string{"feed_url = $1"}, 1},
+		{"search only", nil, "ransomware", []string{"title ILIKE $1", "summary ILIKE $2", "full_content ILIKE $3"}, 3},
+		{"feed and search", []string{"https://example.com/rss"}, "cve", []string{"feed_url = $1", "title ILIKE $2", "summary ILIKE $3", "full_content ILIKE $4"}, 4},
+		{"short search ignored", nil, "a", []string{""}, 0},
 	}
 	for _, c := range cases {
-		where, args, nextIdx := buildArticlesWhere(c.feed, c.q)
+		where, args, nextIdx := buildArticlesWhere(c.feeds, c.q)
 		for _, sub := range c.wantSubstr {
 			if sub != "" && !strings.Contains(where, sub) {
 				t.Errorf("%s: WHERE %q missing %q", c.name, where, sub)
