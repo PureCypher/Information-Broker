@@ -19,16 +19,18 @@ import (
 // re-extracted text actually differs, so a false-positive marker costs one
 // re-fetch and no data change.
 var repairBoilerplateMarkers = []string{
-	"You might also like",         // securityaffairs.com related-posts heading
-	"Recent Articles",             // securityaffairs.com recent-widget heading
-	"We use cookies",              // cookie-consent banners (securityaffairs, many WP sites)
-	"Share this article",          // techradar.com 2026 share rail (also rapid7, elastic, intel471)
-	"Subscribe to our newsletter", // future plc inline newsletter capture ("Are you a pro? ..."); also csoonline/IDG JS-rendered email-capture tail
-	"View Deal",                   // future plc hawk affiliate deal cards ("Save up to ... View Deal")
-	"Read more:",                  // techrepublic/zdnet/therecord/helpnetsecurity read-more widgets
-	"Follow me on Twitter",        // securityaffairs.com standing author-signature footer
-	"Pierluigi Paganini",          // securityaffairs.com signature byline (also matches mid-prose quotes; re-extraction is a no-op for those rows)
+	"You might also like",           // securityaffairs.com related-posts heading
+	"Recent Articles",               // securityaffairs.com recent-widget heading
+	"We use cookies",                // cookie-consent banners (securityaffairs, many WP sites)
+	"Share this article",            // techradar.com 2026 share rail (also rapid7, elastic, intel471)
+	"Subscribe to our newsletter",   // future plc inline newsletter capture ("Are you a pro? ..."); also csoonline/IDG JS-rendered email-capture tail
+	"View Deal",                     // future plc hawk affiliate deal cards ("Save up to ... View Deal")
+	"Read more:",                    // techrepublic/zdnet/therecord/helpnetsecurity read-more widgets
+	"Follow me on Twitter",          // securityaffairs.com standing author-signature footer
+	"Pierluigi Paganini",            // securityaffairs.com signature byline (also matches mid-prose quotes; re-extraction is a no-op for those rows)
 	"Contact us to send story tips", // cybersecurityventures.com standing template footer inside the prose container
+	"Related Articles:",             // bleepingcomputer.com recirculation grid heading
+	"Get the report",                // bleepingcomputer.com .article-callout promo card CTA
 }
 
 type repairRow struct {

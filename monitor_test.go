@@ -903,3 +903,44 @@ func TestExtractMainContentElasticLabsChrome(t *testing.T) {
 		t.Fatalf("expected the article prose, got: %.200q", got)
 	}
 }
+
+func TestExtractMainContentStripsBleepingComputerAdAndRelatedArticles(t *testing.T) {
+	// Real production case (article 79255, bleepingcomputer.com): the page
+	// stores a Ziff Davis promo card (.article-callout with a linked image,
+	// CTA heading, and "Get the report" link to a hubs.li tracker) plus a
+	// "Related Articles:" recirculation grid (.cz-related-article-wrapp) at
+	// the end of the body. Both are publisher chrome and must not reach the
+	// stored article text or content_html.
+	prose := strings.Repeat("Cisco patched the actively exploited SD-WAN zero-day. ", 30)
+	html := `<html><body>
+		<div class="articleBody">
+			<p>` + prose + `</p>
+			<div class="article-callout">
+				<div class="article-media"><a href="https://hubs.li/Q04sB3fb0"><img src="https://www.bleepstatic.com/c/p/p-blue-report-26.jpg" alt="article image"/></a></div>
+				<div class="article-body">
+					<h2><a href="https://hubs.li/Q04sB3fb0">Once attackers have valid credentials, only 37% of their actions are blocked</a></h2>
+					<p>Overall prevention scores can hide what happens after initial access.</p>
+					<a class="article-link" href="https://hubs.li/Q04sB3fb0">Get the report</a>
+				</div>
+			</div>
+			<div class="cz-related-article-wrapp">
+				<h3>Related Articles:</h3>
+				<p><a class="ras" href="https://www.bleepingcomputer.com/news/security/ivanti/">Ivanti warns of Connect Secure zero-day exploited in attacks</a></p>
+			</div>
+		</div>
+	</body></html>`
+
+	doc, _ := goquery.NewDocumentFromReader(strings.NewReader(html))
+	got, bodyHTML := extractMainContent(doc, "Cisco patches new SD-WAN zero-day exploited in attacks")
+	for _, junk := range []string{"Get the report", "Related Articles:", "Ivanti warns", "37% of their actions"} {
+		if strings.Contains(got, junk) {
+			t.Fatalf("bleepingcomputer chrome %q leaked into extracted text: %.200q", junk, got)
+		}
+		if strings.Contains(bodyHTML, junk) {
+			t.Fatalf("bleepingcomputer chrome %q leaked into content_html: %.200q", junk, bodyHTML)
+		}
+	}
+	if !strings.Contains(got, "SD-WAN zero-day") {
+		t.Fatalf("expected the article prose, got: %.200q", got)
+	}
+}

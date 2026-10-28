@@ -783,6 +783,22 @@ func extractMainContent(doc *goquery.Document, title string) (text, bodyHTML str
 	// strip them so ad-slot labels don't pollute the extracted article text.
 	doc.Find(".ad-label").Remove()
 
+	// bleepingcomputer.com injects a Ziff Davis promo card into the article
+	// body: .article-callout > .article-media (linked image) + .article-body
+	// (linked heading, CTA copy, .article-link CTA — e.g. the "Blue Report"
+	// card advertising via hubs.li redirectors). Match that shape so a
+	// legitimate text callout box isn't mistaken for the promo card.
+	doc.Find(".article-callout").Each(func(_ int, s *goquery.Selection) {
+		if s.Find(".article-media, .article-link").Length() > 0 {
+			s.Remove()
+		}
+	})
+
+	// bleepingcomputer.com appends a "Related Articles:" recirculation grid
+	// (.cz-related-article-wrapp) to the end of the article body — publisher
+	// chrome, not content.
+	doc.Find(".cz-related-article-wrapp").Remove()
+
 	// Future plc sites (techradar.com et al.) tag their page widgets with
 	// data-component-name="..."; the article prose sits directly inside
 	// <article>. The share/follow rail, video carousel, "more from" link
