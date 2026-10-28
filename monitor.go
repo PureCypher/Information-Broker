@@ -998,8 +998,23 @@ func extractMainContent(doc *goquery.Document, title string) (text, bodyHTML str
 	// the prose container sweeps in as a tail (2348-row feed; the widget is
 	// JS-rendered, so the form strip above misses it). Truncate the body at
 	// the heading: everything from it on is widget chrome.
+	//
+	// Two guards keep the rule from erasing real articles (found on
+	// securitylabs.datadoghq.com, whose rows came back with 0 characters):
+	//   - The heading is its own block. A link inside a sentence ("...you can
+	//     also <a>subscribe to our newsletter</a> or RSS feed") is prose.
+	//   - A tail widget is never most of the container. The cut removes the
+	//     heading's top-level block and every later sibling, so if that would
+	//     discard more than half the text the match was misidentified (e.g. a
+	//     banner above the article) and the body is kept.
 	newsletter := best.Find("*").FilterFunction(func(_ int, s *goquery.Selection) bool {
-		return strings.ToLower(norm(s.Text())) == "subscribe to our newsletter"
+		if strings.ToLower(norm(s.Text())) != "subscribe to our newsletter" {
+			return false
+		}
+		if p := s.Closest("p, li"); p.Length() > 0 && norm(p.Text()) != norm(s.Text()) {
+			return false
+		}
+		return true
 	}).Last()
 	if newsletter.Length() > 0 {
 		// Climb from the heading to best's direct child; drop that child and
@@ -1008,8 +1023,12 @@ func extractMainContent(doc *goquery.Document, title string) (text, bodyHTML str
 		for c.Parent().Length() > 0 && c.Parent().Get(0) != best.Get(0) {
 			c = c.Parent()
 		}
-		c.NextAll().Remove()
-		c.Remove()
+		cut := len(c.Text())
+		c.NextAll().Each(func(_ int, s *goquery.Selection) { cut += len(s.Text()) })
+		if cut*2 <= len(best.Text()) {
+			c.NextAll().Remove()
+			c.Remove()
+		}
 	}
 
 	// infosecurity-magazine.com embeds related-article links mid-prose as

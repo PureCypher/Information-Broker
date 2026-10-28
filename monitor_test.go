@@ -997,3 +997,63 @@ func TestExtractMainContentIgnoresUnrelatedTextTemplates(t *testing.T) {
 		t.Fatalf("expected the real prose to remain, got: %q", got)
 	}
 }
+
+func TestExtractMainContentKeepsArticleWhenNewsletterIsAnInlineLink(t *testing.T) {
+	// securitylabs.datadoghq.com: the closing paragraph of the article says
+	// "...or open an issue. You can also <a href="#subscribe">subscribe to our
+	// newsletter</a> or RSS feed". The CSO tail rule matched that inline link
+	// (its whole text is the phrase) and deleted the container's direct child,
+	// which on this template is the entire article column, so the row was stored
+	// with 0 characters. An inline link inside a sentence is prose, not the widget.
+	prose := strings.Repeat("Real Datadog Security Labs research prose about the vulnerability. ", 12)
+	html := `<html><body><main>
+		<article class="grid grid-cols-12">
+			<aside class="article-toc hidden">On this page</aside>
+			<div class="col-span-12 desktop:col-span-8">
+				<div class="article-content">
+					<p>` + prose + `</p>
+					<p>We're always eager to hear from you. If you have any questions, send us a message, or open an issue. You can also <a href="#subscribe">subscribe to our newsletter</a> or RSS feed.</p>
+				</div>
+			</div>
+			<div id="feedback-card-sticky">Was this article helpful?</div>
+		</article>
+	</main></body></html>`
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	got, _ := extractMainContent(doc, "")
+	if !strings.Contains(got, "Real Datadog Security Labs research prose") {
+		t.Fatalf("article body was erased by the newsletter rule (got %d chars): %.200q", len(got), got)
+	}
+	if !strings.Contains(got, "send us a message") {
+		t.Fatalf("closing paragraph was dropped: %.200q", got)
+	}
+}
+
+func TestExtractMainContentNewsletterBannerAboveProseDoesNotEraseArticle(t *testing.T) {
+	// The tail rule deletes the heading's top-level block AND every later
+	// sibling. A newsletter banner heading at the TOP of the container would
+	// therefore erase the whole article that follows it. A tail widget can never
+	// be most of the container, so a cut that discards more than half is a
+	// misidentified match and must not be applied.
+	prose := strings.Repeat("The actual article starts after the sign-up banner and runs for a while. ", 10)
+	html := `<html><body>
+		<div class="content">
+			<div class="signup-banner"><h3>Subscribe to our newsletter</h3></div>
+			<p>` + prose + `</p>
+		</div>
+	</body></html>`
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	got, _ := extractMainContent(doc, "")
+	if !strings.Contains(got, "The actual article starts after the sign-up banner") {
+		t.Fatalf("article after a top-of-page newsletter banner was erased (got %d chars): %.200q", len(got), got)
+	}
+}
