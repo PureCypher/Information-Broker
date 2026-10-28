@@ -259,7 +259,7 @@ https://another-feed.com/feed.xml
 docker compose restart rss-monitor
 ```
 
-The system includes 47 pre-configured cybersecurity and technology feeds covering major news sources, security publications, and threat intelligence feeds.
+The repo ships with 160+ pre-configured cybersecurity and technology feeds (see [`feeds.txt`](feeds.txt)) covering major news sources, security publications, and threat intelligence feeds.
 
 #### Adding a feed without flooding Discord
 
