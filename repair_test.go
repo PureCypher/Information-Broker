@@ -78,11 +78,12 @@ func TestSelectRepairCandidatesCaseInsensitiveMarkers(t *testing.T) {
 		{ID: 1, URL: "https://securityaffairs.com/a", FullContent: "Body. You Might Also Like X."},
 		{ID: 2, URL: "https://securityaffairs.com/b", FullContent: "Body. RECENT ARTICLES Y."},
 		{ID: 3, URL: "https://securityaffairs.com/c", FullContent: "Body. WE USE COOKIES on our website."},
-		{ID: 4, URL: "https://securityaffairs.com/d", FullContent: "Clean body."},
+		{ID: 4, URL: "https://cybersecurityventures.com/d", FullContent: "Body. CONTACT US TO SEND STORY TIPS and sponsorship."},
+		{ID: 5, URL: "https://securityaffairs.com/e", FullContent: "Clean body."},
 	}
 	got := selectRepairCandidates(rows, false, 0)
-	if len(got) != 3 {
-		t.Fatalf("expected 3 case-insensitive matches, got %d: %+v", len(got), got)
+	if len(got) != 4 {
+		t.Fatalf("expected 4 case-insensitive matches, got %d: %+v", len(got), got)
 	}
 }
 

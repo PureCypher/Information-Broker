@@ -117,6 +117,127 @@ func TestExtractMainContentStripsScriptAndStyleTags(t *testing.T) {
 	}
 }
 
+func TestExtractMainContentStripsCybersecurityVenturesTemplateChrome(t *testing.T) {
+	// Real-world case found live: cybersecurityventures.com (WordPress
+	// "Bridge" theme) renders publisher template chrome inside the
+	// <article> match — a .ccfic image-caption signature, the .post_info
+	// byline row, Easy-Social-Share rails, the qode print button, a
+	// PODCAST./RADIO./Contact-us standing footer, and a duplicate headline
+	// in h2.entry_title that carries a "13 Oct" date badge ahead of the
+	// title text (so exact/prefix headline rules never match it).
+	const title = "GDC Festival of Gaming 2027 Discount Code: CYBERCRIME. Register Now."
+	html := `<html><body>
+		<article id="post-1">
+			<div class="post_content_holder">
+				<div class="post_image">
+					<img src="https://cybersecurityventures.com/wp-content/uploads/photo.jpg" />
+					<div class="ccfic"><span class="ccfic-text">Cybersecurity News. PHOTO: Cybercrime Magazine.</span></div>
+				</div>
+				<div class="post_text">
+					<div class="post_text_inner">
+						<h2 itemprop="name" class="entry_title"><span class="date entry_date updated">13 Oct</span> ` + title + `</h2>
+						<div class="post_info">
+							<span class="time">Posted at 08:42h</span>
+							in <a href="https://cybersecurityventures.com/category/blogs/">Blogs</a>
+							by <a class="post_author_link" href="https://cybersecurityventures.com/author/tfox/">Taylor Fox</a>
+						</div>
+						<div class="essb_links"><ul class="essb_links_list"><li class="essb_item">share</li></ul></div>
+						<p>` + strings.Repeat("The real article prose that actually matters here. ", 20) + `</p>
+						<ul><li><a href="https://cybersecurityventures.com/podcast/">PODCAST.</a> New episodes daily on the Cybercrime Magazine Podcast.</li></ul>
+						<ul><li><a href="https://cybersecurityventures.com/radio/">RADIO.</a> Tune into WCYB Digital Radio at Cybercrime.Radio.</li></ul>
+						<p><a href="https://cybersecurityventures.com/contact">Contact us</a> to send story tips, feedback and suggestions, and for sponsorship opportunities.</p>
+					</div>
+				</div>
+			</div>
+			<div class="icon_social_holder">
+				<div class="qode_print"><a href="#" class="qode_print_page"><span>Print page</span></a></div>
+			</div>
+		</article>
+	</body></html>`
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	got, _ := extractMainContent(doc, title)
+	for _, leak := range []string{
+		"Cybersecurity News. PHOTO",
+		"Posted at 08:42h",
+		"Taylor Fox",
+		"13 Oct",
+		"PODCAST.",
+		"RADIO.",
+		"story tips",
+		"Print page",
+		title,
+	} {
+		if strings.Contains(got, leak) {
+			t.Fatalf("template chrome %q leaked into extracted content: %s", leak, got)
+		}
+	}
+	if !strings.Contains(got, "real article prose") {
+		t.Fatalf("expected the real article prose to remain, got: %s", got)
+	}
+}
+
+func TestExtractMainContentPrefersTechRepublicAstroContainer(t *testing.T) {
+	// Real-world case found live: techrepublic.com (Astro) has no <article>
+	// element — the prose sits in <astro-article-contents><div
+	// class="article-contents">…</div></astro-article-contents>, and the page
+	// carries a mobile nav drawer ("Go Premium", "Popular Topics") that the
+	// <body> fallback swept in as leading prose.
+	html := `<html><body>
+		<div class="flex flex-col">
+			<div class="px-4 py-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">Popular Topics</div>
+			<a href="/topic/top-products/">Top Products</a>
+			<a href="/premium/">Go Premium</a>
+		</div>
+		<div class="prose"><astro-article-contents><div class="article-contents" data-article-id="4377212"><div class="prose">
+			<p>` + strings.Repeat("The real article prose that actually matters here. ", 20) + `</p>
+		</div></div></astro-article-contents></div>
+	</body></html>`
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	got, _ := extractMainContent(doc, "")
+	if strings.Contains(got, "Go Premium") || strings.Contains(got, "Popular Topics") {
+		t.Fatalf("mobile-nav chrome leaked into extracted content: %s", got)
+	}
+	if !strings.Contains(got, "real article prose") {
+		t.Fatalf("expected the real article prose to remain, got: %s", got)
+	}
+}
+
+func TestExtractMainContentStripsNoscriptTrackingPixel(t *testing.T) {
+	// Found live: techrepublic/cert.org/socprime pages carry a GT tag
+	// manager <noscript> block; the html tokenizer parses noscript contents
+	// as raw text, so the literal `<iframe src=...>` markup reached .Text()
+	// and was stored as the opening line of the article prose.
+	html := `<html><body>
+		<article>
+			<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-57GHMWX" height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+			<p>` + strings.Repeat("The real article prose that actually matters here. ", 20) + `</p>
+		</article>
+	</body></html>`
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	got, _ := extractMainContent(doc, "")
+	if strings.Contains(got, "iframe") || strings.Contains(got, "googletagmanager") {
+		t.Fatalf("noscript tracking-pixel markup leaked into extracted content: %s", got)
+	}
+	if !strings.Contains(got, "real article prose") {
+		t.Fatalf("expected the real article prose to remain, got: %s", got)
+	}
+}
+
 func TestExtractMainContentFindsPageContentWrapper(t *testing.T) {
 	// Real-world case found live: cvefeed.io (a Bootstrap admin-dashboard
 	// theme, 6258 articles -- the largest single feed in the corpus) has no

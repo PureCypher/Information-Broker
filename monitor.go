@@ -677,7 +677,13 @@ func extractMainContent(doc *goquery.Document, title string) (text, bodyHTML str
 	// (its own <head>/<title>/<style>) inside the prose container; the style
 	// tag is dropped above but the embedded page <title> would survive as a
 	// phantom headline line. A <title> is never reader prose.
-	doc.Find("script, style, title").Remove()
+	// <noscript> too: the html tokenizer parses its contents as raw text, so
+	// a <noscript><iframe> tracking pixel (GT tag managers) reaches .Text()
+	// as the literal string `<iframe src=...>` — stored prose that starts
+	// with markup (techrepublic/cert.org/socprime rows). <iframe> itself is
+	// kept: it is a real embed (video) in some prose containers, and its raw
+	// text content is empty in practice.
+	doc.Find("script, style, title, noscript").Remove()
 
 	// Strip known non-article widgets before measuring/using any selector's
 	// text — e.g. "#ar-widget" is a common "Listen to this article"
@@ -788,6 +794,11 @@ func extractMainContent(doc *goquery.Document, title string) (text, bodyHTML str
 		// longest-match ranking would otherwise pick the enclosing <article>
 		// over .articleBody.
 		".articleBody",
+		// techrepublic.com (Astro) wraps prose in a custom
+		// astro-article-contents element with no <article> tag; without this
+		// the extractor fell back to <body> and swept in the mobile nav
+		// drawer ("Go Premium", "Popular Topics", hub links).
+		".article-contents",
 	}
 	// Broad page wrappers, used ONLY when no precise selector matched — some
 	// sites (Bootstrap admin themes like cvefeed.io) have no article/
@@ -926,6 +937,32 @@ func extractMainContent(doc *goquery.Document, title string) (text, bodyHTML str
 		}
 	})
 	best.Find(".social-media").Remove()
+
+	// cybersecurityventures.com (WordPress "Bridge" theme) sweeps template
+	// chrome into the <article> match: a .ccfic image-caption signature
+	// ("Cybersecurity News. PHOTO: Cybercrime Magazine."), the .post_info
+	// byline/date row, Easy-Social-Share rails, the qode print button, and
+	// a standing PODCAST./RADIO./Contact-us template footer rendered inside
+	// the prose container. Its duplicate headline sits in h2.entry_title
+	// carrying a "13 Oct" date badge before the title text, so the exact and
+	// prefix h1 rules below never match it — drop an entry_title that merely
+	// contains the title.
+	best.Find(".ccfic, .post_info, .essb_links, .icon_social_holder, .qode_print").Remove()
+	best.Find("p, li").Each(func(_ int, s *goquery.Selection) {
+		t := strings.ToLower(norm(s.Text()))
+		// The footer list items open with keyword periods ("PODCAST.",
+		// "RADIO."); real prose lists use colons ("Podcast: ...").
+		if strings.HasPrefix(t, "podcast.") ||
+			strings.HasPrefix(t, "radio.") ||
+			strings.HasPrefix(t, "contact us to send story tips") {
+			s.Remove()
+		}
+	})
+	best.Find("h2.entry_title").Each(func(_ int, s *goquery.Selection) {
+		if norm(title) != "" && strings.Contains(norm(s.Text()), norm(title)) {
+			s.Remove()
+		}
+	})
 
 	// A publisher's leading <h1> that repeats the article title duplicates
 	// the headline the reading page already renders (bleepingcomputer puts
