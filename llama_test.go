@@ -23,7 +23,7 @@ func TestLlamaChatSendsNativeRequestAndReturnsContent(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	out, err := llamaChat(context.Background(), srv.Client(), srv.URL, "test-agent", "Summarize this", 256)
+	out, err := llamaChat(context.Background(), srv.Client(), srv.URL, "", "test-agent", "Summarize this", 256)
 	if err != nil {
 		t.Fatalf("llamaChat error: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestLlamaChatSurfacesServerErrorMessage(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := llamaChat(context.Background(), srv.Client(), srv.URL, "ua", "x", 64)
+	_, err := llamaChat(context.Background(), srv.Client(), srv.URL, "", "ua", "x", 64)
 	if err == nil || !strings.Contains(err.Error(), "503") || !strings.Contains(err.Error(), "Loading model") {
 		t.Fatalf("want status and server message in error, got %v", err)
 	}
@@ -62,7 +62,7 @@ func TestLlamaChatRejectsEmptyContent(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, err := llamaChat(context.Background(), srv.Client(), srv.URL, "ua", "x", 64); err == nil {
+	if _, err := llamaChat(context.Background(), srv.Client(), srv.URL, "", "ua", "x", 64); err == nil {
 		t.Fatal("expected error when the model produced no answer text")
 	}
 }
@@ -73,7 +73,7 @@ func TestLlamaChatRejectsResponseWithoutChoices(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, err := llamaChat(context.Background(), srv.Client(), srv.URL, "ua", "x", 64); err == nil {
+	if _, err := llamaChat(context.Background(), srv.Client(), srv.URL, "", "ua", "x", 64); err == nil {
 		t.Fatal("expected error when choices is empty")
 	}
 }

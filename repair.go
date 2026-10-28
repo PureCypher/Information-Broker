@@ -23,7 +23,7 @@ var repairBoilerplateMarkers = []string{
 	"Recent Articles",     // securityaffairs.com recent-widget heading
 	"We use cookies",      // cookie-consent banners (securityaffairs, many WP sites)
 	"Share this article",  // techradar.com 2026 share rail (also rapid7, elastic, intel471)
-	"Subscribe to our newsletter", // future plc inline newsletter capture ("Are you a pro? ...")
+	"Subscribe to our newsletter", // future plc inline newsletter capture ("Are you a pro? ..."); also csoonline/IDG JS-rendered email-capture tail
 	"View Deal",           // future plc hawk affiliate deal cards ("Save up to ... View Deal")
 	"Read more:",          // techrepublic/zdnet/therecord/helpnetsecurity read-more widgets
 }

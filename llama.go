@@ -19,6 +19,7 @@ type llamaChatMessage struct {
 }
 
 type llamaChatRequest struct {
+	Model              string             `json:"model,omitempty"` // ignored by llama-server (single-model); required by other OpenAI-compatible servers (e.g. Ollama)
 	Messages           []llamaChatMessage `json:"messages"`
 	MaxTokens          int                `json:"max_tokens"`
 	Temperature        float64            `json:"temperature"`
@@ -55,8 +56,9 @@ func llamaServerError(status int, body []byte) error {
 // text. The server applies the model's own chat template, which the raw /completion route would
 // not. Thinking is switched off per request: Granite 4.2 otherwise spends most of its tokens
 // reasoning before a two-sentence summary.
-func llamaChat(ctx context.Context, client *http.Client, baseURL, userAgent, prompt string, maxTokens int) (string, error) {
+func llamaChat(ctx context.Context, client *http.Client, baseURL, model, userAgent, prompt string, maxTokens int) (string, error) {
 	payload, err := json.Marshal(llamaChatRequest{
+		Model:              model,
 		Messages:           []llamaChatMessage{{Role: "user", Content: prompt}},
 		MaxTokens:          maxTokens,
 		Temperature:        llamaTemperature,

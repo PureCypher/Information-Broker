@@ -153,7 +153,7 @@ Summary:`, maxSummaryLength, articleText)
 
 // callLlamaAPI asks the llama.cpp server for a summary of the prompt and tidies the result.
 func (s *ArticleSummarizer) callLlamaAPI(ctx context.Context, prompt string) (string, error) {
-	summary, err := llamaChat(ctx, s.httpClient, s.config.LLM.URL, s.config.API.UserAgent, prompt, s.config.LLM.MaxTokens)
+	summary, err := llamaChat(ctx, s.httpClient, s.config.LLM.URL, s.config.LLM.Model, s.config.API.UserAgent, prompt, s.config.LLM.MaxTokens)
 	if err != nil {
 		return "", err
 	}
