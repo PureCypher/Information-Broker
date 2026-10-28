@@ -153,6 +153,31 @@ func summaryNeedsRegen(summary string) bool {
 	return false
 }
 
+// repairOutcome is what runRepair does with a re-extracted article.
+type repairOutcome int
+
+const (
+	repairApply       repairOutcome = iota // fetched text differs: write it
+	repairUnchanged                        // identical to stored: leave the row alone
+	repairRejectEmpty                      // extractor produced no text: keep stored content
+)
+
+// classifyRepairResult decides whether a re-extraction may replace the stored
+// content. An empty extraction is the extractor failing on that page, not the
+// article being empty — replacing stored prose with it destroys data
+// (security.googleblog.com id=2399: 10003 chars -> 0), so it is rejected.
+func classifyRepairResult(stored, fetched string) repairOutcome {
+	fetched = strings.TrimSpace(fetched)
+	switch {
+	case fetched == "":
+		return repairRejectEmpty
+	case fetched == strings.TrimSpace(stored):
+		return repairUnchanged
+	default:
+		return repairApply
+	}
+}
+
 // runRepair re-fetches stored articles matching pattern, re-extracts them
 // with the current extractMainContent, and updates full_content/content_html
 // ONLY when the re-extracted text differs from what is stored. A changed row
@@ -223,7 +248,15 @@ func runRepair(db *sql.DB, cfg *config.Config, args []string) error {
 			time.Sleep(2 * time.Second)
 			continue
 		}
-		if content == strings.TrimSpace(r.FullContent) {
+		outcome := classifyRepairResult(r.FullContent, content)
+		if outcome == repairRejectEmpty {
+			log.Printf("  [%d/%d] id=%d FAIL: re-extraction produced no text; stored content (%d chars) kept",
+				i+1, len(candidates), r.ID, len(r.FullContent))
+			failed++
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		if outcome == repairUnchanged {
 			// Re-extraction produced identical text: the stored content is
 			// already what the current extractor produces — leave the row
 			// (and its summary) alone.

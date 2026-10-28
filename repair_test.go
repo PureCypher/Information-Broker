@@ -123,3 +123,33 @@ func TestParseRepairArgsFlagsAfterPositional(t *testing.T) {
 		t.Fatalf("positional args wrong: %v", fs.Args())
 	}
 }
+
+func TestClassifyRepairResultRejectsEmptyExtraction(t *testing.T) {
+	// Found live: security.googleblog.com id=2399 was re-fetched, the
+	// extractor produced nothing, and repair overwrote 10003 chars of
+	// (contaminated but present) prose with an empty string. An empty
+	// extraction means the extractor failed on this page, not that the
+	// article is empty — never replace stored content with it.
+	stored := `<span class="byline-author">Posted by Eric Lynch</span> real prose`
+	for name, fetched := range map[string]string{
+		"empty":           "",
+		"whitespace only": " \n\t ",
+	} {
+		if got := classifyRepairResult(stored, fetched); got != repairRejectEmpty {
+			t.Errorf("%s: classifyRepairResult = %v, want repairRejectEmpty", name, got)
+		}
+	}
+}
+
+func TestClassifyRepairResultUnchangedAndApply(t *testing.T) {
+	if got := classifyRepairResult("same prose", "  same prose\n"); got != repairUnchanged {
+		t.Errorf("identical after trim: got %v, want repairUnchanged", got)
+	}
+	if got := classifyRepairResult("<iframe src=x>", "real prose"); got != repairApply {
+		t.Errorf("genuine change: got %v, want repairApply", got)
+	}
+	// A row that was already empty can accept a real extraction.
+	if got := classifyRepairResult("", "real prose"); got != repairApply {
+		t.Errorf("empty stored, real fetched: got %v, want repairApply", got)
+	}
+}
