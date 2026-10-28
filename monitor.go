@@ -456,6 +456,77 @@ func (m *RSSMonitor) fetchViaFlareSolverr(ctx context.Context, feedURL string, s
 	return m.processFeedItems(ctx, feedURL, feed, startTime)
 }
 
+// flareSolverrArticleHTML solves a WAF challenge for a single article page via
+// FlareSolverr and returns the rendered page HTML. Shared by the live article
+// extraction path and the repair/backfill re-extraction command, which would
+// otherwise fail with HTTP 403 on Cloudflare-protected publishers (e.g.
+// cyberdefensemagazine.com) even though their feeds are solvable.
+func flareSolverrArticleHTML(fsURL string, fsTimeout time.Duration, pageURL string) (string, error) {
+	payload, err := json.Marshal(map[string]interface{}{
+		"cmd":        "request.get",
+		"url":        pageURL,
+		"maxTimeout": int(fsTimeout / time.Millisecond),
+	})
+	if err != nil {
+		return "", fmt.Errorf("FlareSolverr: marshal request: %w", err)
+	}
+
+	// Allow the solver its full maxTimeout plus headroom for browser startup.
+	reqCtx, cancel := context.WithTimeout(context.Background(), fsTimeout+30*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, "POST", fsURL, bytes.NewReader(payload))
+	if err != nil {
+		return "", fmt.Errorf("FlareSolverr: create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: fsTimeout + 30*time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("FlareSolverr: request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("FlareSolverr: read response: %w", err)
+	}
+
+	var fsResp flareSolverrResponse
+	if err := json.Unmarshal(raw, &fsResp); err != nil {
+		return "", fmt.Errorf("FlareSolverr: decode response: %w", err)
+	}
+	if fsResp.Status != "ok" {
+		return "", fmt.Errorf("FlareSolverr: solver status %q: %s", fsResp.Status, fsResp.Message)
+	}
+	if fsResp.Solution.Status != http.StatusOK {
+		return "", fmt.Errorf("FlareSolverr: solved with HTTP %d", fsResp.Solution.Status)
+	}
+	return fsResp.Solution.Response, nil
+}
+
+// extractSolvedArticle extracts text/HTML from FlareSolverr's rendered page
+// with the standard extractor and length caps. Shared by the live fetch path
+// and the repair/backfill command.
+func extractSolvedArticle(solvedHTML, title string, maxLen, maxHTMLLen int) (string, string, error) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(solvedHTML))
+	if err != nil {
+		return "", "", err
+	}
+	text, bodyHTML := extractMainContent(doc, title)
+	content := strings.TrimSpace(text)
+	if len(content) > maxLen {
+		content = safeTruncate(content, maxLen) + "..."
+	}
+	if len(bodyHTML) > maxHTMLLen {
+		// A byte cut may split a tag or attribute; the frontend's parser
+		// tolerates truncated markup (unbalanced tags are auto-closed).
+		bodyHTML = safeTruncate(bodyHTML, maxHTMLLen)
+	}
+	return content, bodyHTML, nil
+}
+
 // flareError centralises error logging and metrics for the FlareSolverr path.
 func (m *RSSMonitor) flareError(feedURL string, startTime time.Time, msg string) error {
 	full := "FlareSolverr: " + msg
@@ -1035,6 +1106,20 @@ func (m *RSSMonitor) fetchFullContent(ctx context.Context, url, title string) (c
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		// Cloudflare-style WAFs block the plain client on some publishers even
+		// though their feeds pass via FlareSolverr. Retry the page through the
+		// solver; without it these articles are permanently stuck on the
+		// feed-description fallback. Only challenge statuses trigger the
+		// (headless-browser, expensive) solver — genuine 404s must not.
+		if m.config.FlareSolverr.URL != "" && isChallengeStatus(resp.StatusCode) {
+			log.Printf("Article %s: HTTP %d, retrying via FlareSolverr", url, resp.StatusCode)
+			solved, ferr := flareSolverrArticleHTML(m.config.FlareSolverr.URL, m.config.FlareSolverr.Timeout, url)
+			if ferr != nil {
+				return "", "", ferr
+			}
+			return extractSolvedArticle(solved, title,
+				m.config.Performance.MaxArticleContentLength, m.config.Performance.MaxArticleHTMLLength)
+		}
 		return "", "", fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 

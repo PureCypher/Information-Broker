@@ -214,7 +214,7 @@ func runRepair(db *sql.DB, cfg *config.Config, args []string) error {
 	maxHTMLLen := cfg.Performance.MaxArticleHTMLLength
 	updated, unchanged, failed := 0, 0, 0
 	for i, r := range candidates {
-		content, contentHTML, err := backfillFetch(client, cfg.API.UserAgent, r.URL, r.Title, maxLen, maxHTMLLen)
+		content, contentHTML, err := backfillFetch(client, cfg.API.UserAgent, r.URL, r.Title, maxLen, maxHTMLLen, cfg.FlareSolverr.URL, cfg.FlareSolverr.Timeout)
 		if err != nil {
 			log.Printf("  [%d/%d] id=%d FAIL: %v", i+1, len(candidates), r.ID, err)
 			failed++

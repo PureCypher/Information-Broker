@@ -44,7 +44,7 @@ func runBackfill(db *sql.DB, cfg *config.Config, pattern string) error {
 	maxHTMLLen := cfg.Performance.MaxArticleHTMLLength
 	updated, skipped, failed := 0, 0, 0
 	for i, it := range items {
-		content, contentHTML, err := backfillFetch(client, cfg.API.UserAgent, it.url, it.title, maxLen, maxHTMLLen)
+		content, contentHTML, err := backfillFetch(client, cfg.API.UserAgent, it.url, it.title, maxLen, maxHTMLLen, cfg.FlareSolverr.URL, cfg.FlareSolverr.Timeout)
 		if err != nil {
 			log.Printf("  [%d/%d] id=%d FAIL: %v", i+1, len(items), it.id, err)
 			failed++
@@ -75,8 +75,9 @@ func runBackfill(db *sql.DB, cfg *config.Config, pattern string) error {
 
 // backfillFetch fetches url and re-extracts it with the current extractor.
 // title is the stored article title, used to drop a body-embedded duplicate
-// headline; pass "" when unknown.
-func backfillFetch(client *http.Client, ua, url, title string, maxLen, maxHTMLLen int) (string, string, error) {
+// headline; pass "" when unknown. fsURL/fsTimeout enable the FlareSolverr
+// fallback for WAF-blocked pages (empty fsURL disables it).
+func backfillFetch(client *http.Client, ua, url, title string, maxLen, maxHTMLLen int, fsURL string, fsTimeout time.Duration) (string, string, error) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return "", "", err
@@ -88,6 +89,14 @@ func backfillFetch(client *http.Client, ua, url, title string, maxLen, maxHTMLLe
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		if fsURL != "" && isChallengeStatus(resp.StatusCode) {
+			log.Printf("  HTTP %d, retrying via FlareSolverr", resp.StatusCode)
+			solved, ferr := flareSolverrArticleHTML(fsURL, fsTimeout, url)
+			if ferr != nil {
+				return "", "", ferr
+			}
+			return extractSolvedArticle(solved, title, maxLen, maxHTMLLen)
+		}
 		return "", "", fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	doc, err := goquery.NewDocumentFromReader(resp.Body)
