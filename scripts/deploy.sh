@@ -86,7 +86,7 @@ show_status() {
     sleep 5
     
     # Check each service health
-    services=("rss-monitor" "postgres" "prometheus" "grafana")
+    services=("rss-monitor" "postgres" "prometheus")
     
     for service in "${services[@]}"; do
         if docker compose ps "$service" | grep -q "Up (healthy)"; then
@@ -105,7 +105,6 @@ show_urls() {
     print_status "Access URLs:"
     echo "  📊 API Endpoints:     http://localhost:8080"
     echo "  📈 Prometheus:        http://localhost:9090"
-    echo "  📋 Grafana:          http://localhost:3001 (admin/your_password)"
     echo "  🔧 Health Check:     http://localhost:8080/health"
     echo "  📊 Metrics:          http://localhost:8080/metrics"
 }

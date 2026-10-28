@@ -105,9 +105,6 @@ coverage/
 # Prometheus data
 prometheus_data/
 
-# Grafana data
-grafana_data/
-
 # PostgreSQL data
 postgres_data/
 

@@ -152,7 +152,9 @@ services:
     image: prom/prometheus:v3.5.5
     container_name: information-broker-prometheus
     ports:
-      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+      # Local-only by default. Set PROMETHEUS_BIND to this host's LAN IP so an
+      # external Grafana can use Prometheus as a data source (it has no auth).
+      - "${PROMETHEUS_BIND:-127.0.0.1}:${PROMETHEUS_PORT:-9090}:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
@@ -165,57 +167,6 @@ services:
       - '--log.level=${PROMETHEUS_LOG_LEVEL:-info}'
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
-    networks:
-      - app-network
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "50m"
-        max-file: "3"
-
-  # Grafana Dashboard
-  grafana:
-    image: grafana/grafana:11.6.16
-    container_name: information-broker-grafana
-    ports:
-      - "${GRAFANA_PORT:-3001}:3000"
-    environment:
-      # Security
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
-      GF_SECURITY_SECRET_KEY: ${GRAFANA_SECRET_KEY:?GRAFANA_SECRET_KEY must be set in .env}
-      
-      # Users
-      GF_USERS_ALLOW_SIGN_UP: ${GRAFANA_ALLOW_SIGNUP:-false}
-      GF_USERS_AUTO_ASSIGN_ORG_ROLE: ${GRAFANA_AUTO_ASSIGN_ROLE:-Viewer}
-      
-      # Anonymous access
-      GF_AUTH_ANONYMOUS_ENABLED: ${GRAFANA_ANONYMOUS_ENABLED:-false}
-      
-      # Plugins
-      GF_INSTALL_PLUGINS: ${GRAFANA_PLUGINS:-}
-      
-      # Logging
-      GF_LOG_LEVEL: ${GRAFANA_LOG_LEVEL:-info}
-
-      # Default landing page: the consolidated Operations Overview dashboard
-      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/information-broker-overview.json
-
-      # Database (use SQLite for simplicity)
-      GF_DATABASE_TYPE: sqlite3
-      GF_DATABASE_PATH: /var/lib/grafana/grafana.db
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
-    depends_on:
-      prometheus:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -364,5 +315,3 @@ volumes:
     name: information-broker-postgres-data
   prometheus_data:
     name: information-broker-prometheus-data
-  grafana_data:
-    name: information-broker-grafana-data

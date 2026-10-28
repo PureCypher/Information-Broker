@@ -31,8 +31,7 @@ help:
 	@echo ""
 	@echo "Monitoring:"
 	@echo "  prometheus         Start Prometheus monitoring"
-	@echo "  grafana           Start Grafana dashboards"
-	@echo "  monitoring        Start complete monitoring stack"
+	@echo "  monitoring        Start the monitoring stack (Prometheus)"
 	@echo ""
 
 # Development commands
@@ -89,17 +88,10 @@ prometheus:
 	docker compose up -d prometheus
 	@echo "Prometheus available at http://localhost:9090"
 
-grafana:
-	@echo "Starting Grafana..."
-	docker compose up -d grafana
-	@echo "Grafana available at http://localhost:3000"
-
 monitoring:
 	@echo "Starting monitoring stack..."
-	docker compose up -d prometheus grafana
-	@echo "Monitoring stack started:"
-	@echo "  Prometheus: http://localhost:9090"
-	@echo "  Grafana: http://localhost:3000"
+	docker compose up -d prometheus
+	@echo "Prometheus: http://localhost:9090 (set PROMETHEUS_BIND to let an external Grafana connect)"
 
 # Database management
 clear-db:

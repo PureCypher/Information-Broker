@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Information Broker - Password Generation Script
-# This script generates secure passwords for the database and Grafana
+# This script generates secure passwords for the database
 
 set -euo pipefail
 
@@ -48,17 +48,6 @@ generate_password() {
 }
 
 # Function to generate a secret key (alphanumeric only for better compatibility)
-generate_secret_key() {
-    local length=${1:-32}
-    # Generate alphanumeric key
-    if command -v openssl &> /dev/null; then
-        openssl rand -hex $((length / 2)) | head -c "$length"
-    else
-        # Use dd with urandom to avoid SIGPIPE issues
-        dd if=/dev/urandom bs=1 count=100 2>/dev/null | LC_ALL=C tr -dc 'A-Za-z0-9' | head -c "$length"
-    fi
-}
-
 # Function to check if required tools are available
 check_dependencies() {
     print_status "Checking dependencies..."
@@ -142,13 +131,9 @@ main() {
     
     # Generate passwords
     DB_PASSWORD=$(generate_password 32)
-    GRAFANA_ADMIN_PASSWORD=$(generate_password 24)
-    GRAFANA_SECRET_KEY=$(generate_secret_key 32)
     
     # Update environment variables
     update_env_var "DB_PASSWORD" "$DB_PASSWORD"
-    update_env_var "GRAFANA_ADMIN_PASSWORD" "$GRAFANA_ADMIN_PASSWORD"
-    update_env_var "GRAFANA_SECRET_KEY" "$GRAFANA_SECRET_KEY"
     
     echo
     print_success "Password generation completed!"
@@ -163,15 +148,6 @@ main() {
     echo -e "  Variable: ${GREEN}DB_PASSWORD${NC}"
     echo -e "  Value:    ${GREEN}$DB_PASSWORD${NC}"
     echo
-    echo -e "${YELLOW}Grafana Admin Password:${NC}"
-    echo -e "  Variable: ${GREEN}GRAFANA_ADMIN_PASSWORD${NC}"
-    echo -e "  Value:    ${GREEN}$GRAFANA_ADMIN_PASSWORD${NC}"
-    echo -e "  Login:    ${GREEN}admin${NC} / ${GREEN}$GRAFANA_ADMIN_PASSWORD${NC}"
-    echo
-    echo -e "${YELLOW}Grafana Secret Key:${NC}"
-    echo -e "  Variable: ${GREEN}GRAFANA_SECRET_KEY${NC}"
-    echo -e "  Value:    ${GREEN}$GRAFANA_SECRET_KEY${NC}"
-    echo
     echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
     echo
     
@@ -181,14 +157,12 @@ main() {
     echo "  • A backup of your previous .env file was created if it existed"
     echo "  • Use these credentials to access your services:"
     echo "    - Database: Use DB_PASSWORD for PostgreSQL connection"
-    echo "    - Grafana: Login with admin / GRAFANA_ADMIN_PASSWORD"
     echo
     
     print_status "Next steps:"
     echo "  1. Review the generated .env file"
     echo "  2. Start your services with: docker-compose up -d"
-    echo "  3. Access Grafana at http://localhost:3001"
-    echo "  4. Store these credentials securely"
+    echo "  3. Store these credentials securely"
     echo
     
     print_success "Password generation script completed successfully!"
@@ -202,8 +176,6 @@ show_help() {
     echo ""
     echo "This script generates secure passwords for:"
     echo "  • PostgreSQL database (DB_PASSWORD)"
-    echo "  • Grafana admin user (GRAFANA_ADMIN_PASSWORD)"  
-    echo "  • Grafana secret key (GRAFANA_SECRET_KEY)"
     echo ""
     echo "Options:"
     echo "  -h, --help     Show this help message"

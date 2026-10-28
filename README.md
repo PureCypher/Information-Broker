@@ -34,8 +34,8 @@ Information Broker solves the challenge of staying informed in today's informati
 └─────────────────┘    └──────────────────┘
                                 │
                        ┌──────────────────┐
-                       │   Grafana        │
-                       │   Dashboards     │
+                       │   Grafana (ext.) │
+                       │   Your server    │
                        │   - Health       │
                        │   - Performance  │
                        │   - Alerts       │
@@ -50,7 +50,7 @@ Information Broker solves the challenge of staying informed in today's informati
 - **Discord Publisher**: Webhook-based notification system with formatted summaries and article links
 - **PostgreSQL Database**: Persistent storage for articles, summaries, logs, and operational metrics
 - **Prometheus Metrics**: Real-time monitoring of all pipeline stages with custom metrics
-- **Grafana Dashboards**: Pre-configured visualizations for system health and performance analysis
+- **Grafana Dashboard**: A ready-made dashboard (`grafana/dashboards/information-broker-ops.json`) for your own Grafana server; this repo does not run Grafana itself
 
 ## Key Features
 
@@ -58,7 +58,7 @@ Information Broker solves the challenge of staying informed in today's informati
 - **Centralized Queueing**: Thread-safe queue management with priority handling and backpressure protection
 - **Robust Error Handling**: Circuit breakers, exponential backoff, and comprehensive retry logic
 - **Real-time Metrics**: Prometheus integration tracking feed processing, summarization success/failure, queue depth, and latency
-- **Complete Observability**: Pre-built Grafana dashboards for monitoring errors, throughput, and system health
+- **Complete Observability**: A ready-made Grafana dashboard for monitoring errors, throughput, and system health
 - **Zero-Configuration Setup**: Fully containerized with Docker Compose and environment-based configuration
 - **Content Deduplication**: SHA-256 content hashing prevents duplicate article processing
 - **Health Monitoring**: Built-in health checks for all services with dependency validation
@@ -85,14 +85,13 @@ Information Broker solves the challenge of staying informed in today's informati
 
 2. **Generate Secure Passwords**
    ```bash
-   # Generate secure passwords for database and Grafana
+   # Generate a secure database password
    ./scripts/generate-passwords.sh
    ```
    
    This script will:
    - Create a backup of your existing `.env` file
-   - Generate secure random passwords for database and Grafana
-   - Create a 32-character secret key for Grafana
+   - Generate a secure random password for the database
    - Update your `.env` file with the new credentials
    - Display the generated credentials for your records
 
@@ -107,8 +106,6 @@ Information Broker solves the challenge of staying informed in today's informati
    
    # Passwords are already generated - no manual entry needed!
    # DB_PASSWORD=<automatically_generated>
-   # GRAFANA_ADMIN_PASSWORD=<automatically_generated>
-   # GRAFANA_SECRET_KEY=<automatically_generated>
    ```
 
 4. **Start the System**
@@ -138,7 +135,7 @@ After successful deployment, access these services:
 | **Application API** | http://localhost:8080 | Health checks, statistics, manual triggers |
 | **Health Check** | http://localhost:8080/health | Service health status |
 | **Prometheus** | http://localhost:9090 | Metrics collection and querying |
-| **Grafana** | http://localhost:3001 | Dashboards and visualization (admin/admin) |
+| **Grafana** | your own server | Add Prometheus (`http://<host>:9090`) as a data source and import the dashboard; see [docs/grafana-operations-overview.md](docs/grafana-operations-overview.md) |
 | **PostgreSQL** | localhost:5432 | Database access (postgres/postgres) |
 
 ## Security Setup
@@ -155,8 +152,6 @@ Information Broker includes automated scripts for generating secure passwords an
 
 This script generates:
 - **Database Password**: 32-character secure password for PostgreSQL
-- **Grafana Admin Password**: 24-character password for Grafana admin login
-- **Grafana Secret Key**: 32-character alphanumeric key for internal encryption
 
 #### Manual Password Management
 If you prefer to set passwords manually, edit the `.env` file:
@@ -164,9 +159,6 @@ If you prefer to set passwords manually, edit the `.env` file:
 # Database credentials
 DB_PASSWORD=your_secure_32_character_password_here
 
-# Grafana credentials
-GRAFANA_ADMIN_PASSWORD=your_secure_grafana_password
-GRAFANA_SECRET_KEY=your_32_character_secret_key_here
 ```
 
 **Security Best Practices**:
@@ -237,8 +229,7 @@ HTTP_WRITE_TIMEOUT=15s             # HTTP client write timeout
 ```bash
 PROMETHEUS_PORT=9090               # Prometheus server port
 PROMETHEUS_RETENTION=90d           # Metrics retention period
-GRAFANA_PORT=3001                  # Grafana dashboard port
-GRAFANA_ADMIN_PASSWORD=admin       # Grafana admin password
+PROMETHEUS_BIND=127.0.0.1          # Prometheus listen address (a LAN IP lets an external Grafana connect)
 ```
 
 ## Usage
@@ -420,11 +411,15 @@ make api-test
 make health
 ```
 
-### Grafana Dashboard Access
+### Grafana Dashboard
 
-1. **Access Grafana**: Navigate to http://localhost:3001
-2. **Login**: Use `admin` / `admin` (or your configured password)
-3. **View Dashboards**: Pre-configured dashboards are available in the "Information Broker" folder
+This repo does not run Grafana. Point your own Grafana at Prometheus and import the dashboard:
+
+1. Set `PROMETHEUS_BIND` in `.env` to this host's LAN IP and restart Prometheus (`docker compose up -d prometheus`)
+2. In Grafana, add a Prometheus data source with URL `http://<host>:9090`
+3. Import `grafana/dashboards/information-broker-ops.json` (or run `python3 grafana/import-dashboard.py`)
+
+Panels, thresholds and setup details: [docs/grafana-operations-overview.md](docs/grafana-operations-overview.md).
 
 ### Graceful Shutdown
 
@@ -463,36 +458,9 @@ The system provides comprehensive real-time and historical visibility into conte
 - **No Articles Processed**: Critical alert when no articles are processed for 24 hours
 - **Database Growth Stalled**: Alert when no new articles are added for 2 days
 
-### Grafana Dashboards
+### Grafana Dashboard Panels
 
-The system includes five pre-configured dashboards:
-
-1. **Information Broker Overview** (`information-broker-dashboard.json`)
-   - System health indicators
-   - Processing rates and queue status
-   - Error rate monitoring
-   - **NEW: Total Articles in Database panel**
-   - **NEW: Daily Article Ingestion Rate chart**
-
-2. **Feed Processing Rates** (`feed-processing-rates-dashboard.json`)
-   - Per-feed processing statistics
-   - Success/failure rates
-   - Processing time analysis
-
-3. **Pipeline Latency** (`pipeline-latency-dashboard.json`)
-   - End-to-end processing times
-   - Queue wait times
-   - API response latencies
-
-4. **Summarization Success/Failure** (`summarization-success-failure-dashboard.json`)
-   - AI summarization metrics
-   - Model performance tracking
-   - Error categorization
-
-5. **Discord Latency & Errors** (`discord-latency-errors-dashboard.json`)
-   - Webhook delivery performance
-   - Discord API error tracking
-   - Message formatting metrics
+`grafana/dashboards/information-broker-ops.json` is a single operations dashboard for an external Grafana (Prometheus data source). It covers service status and alerts, RSS ingest, the summarizer queue and latency, Discord delivery, API traffic, failing feeds, and runtime capacity. See [docs/grafana-operations-overview.md](docs/grafana-operations-overview.md).
 
 ### Key Prometheus Metrics
 
