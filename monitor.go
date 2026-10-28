@@ -754,6 +754,14 @@ func extractMainContent(doc *goquery.Document, title string) (text, bodyHTML str
 	// with markup (techrepublic/cert.org/socprime rows). <iframe> itself is
 	// kept: it is a real embed (video) in some prose containers, and its raw
 	// text content is empty in practice.
+	// Blogger's dynamic layout (security.googleblog.com) ships the post as
+	// HTML inside <script type='text/template'> under the articleBody
+	// container and renders it client-side; the <noscript> copy is stripped
+	// below. Unwrap the template first so the container isn't left empty.
+	// Scoped to article containers: other text/template scripts are UI.
+	doc.Find("[itemprop='articleBody'] script[type='text/template'], .post-body script[type='text/template']").Each(func(_ int, s *goquery.Selection) {
+		s.ReplaceWithHtml(s.Text())
+	})
 	doc.Find("script, style, title, noscript").Remove()
 
 	// Strip known non-article widgets before measuring/using any selector's

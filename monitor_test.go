@@ -944,3 +944,56 @@ func TestExtractMainContentStripsBleepingComputerAdAndRelatedArticles(t *testing
 		t.Fatalf("expected the article prose, got: %.200q", got)
 	}
 }
+
+func TestExtractMainContentUnwrapsBloggerTemplateBody(t *testing.T) {
+	// Found live: security.googleblog.com (Blogger dynamic layout) ships the
+	// post as HTML inside <script type='text/template'> under the
+	// articleBody container (rendered client-side) and again inside
+	// <noscript>. Stripping script+noscript left the container empty and
+	// repair stored 0 chars. The template body is the article; the noscript
+	// copy must stay stripped so the prose is neither lost nor duplicated.
+	prose := strings.Repeat("Real Blogger article prose that matters. ", 20)
+	html := `<html><body>
+		<div class='post-body'><div class='post-content' itemprop='articleBody'>
+			<script type='text/template'><p>` + prose + `</p></script>
+		</div></div>
+		<noscript><p>` + prose + `</p></noscript>
+	</body></html>`
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	got, _ := extractMainContent(doc, "")
+	if n := strings.Count(got, "Real Blogger article prose"); n != 20 {
+		t.Fatalf("expected the template body exactly once (20 sentences), found %d in: %q", n, got)
+	}
+	if strings.Contains(got, "<p>") || strings.Contains(got, "&lt;") {
+		t.Fatalf("template markup leaked as literal text: %q", got)
+	}
+}
+
+func TestExtractMainContentIgnoresUnrelatedTextTemplates(t *testing.T) {
+	// Only the articleBody template is article prose; UI templates elsewhere
+	// ({{placeholders}} for comment widgets and the like) must not be injected.
+	html := `<html><body>
+		<article>
+			<p>` + strings.Repeat("Ordinary article prose lives right here. ", 20) + `</p>
+			<div class="comments"><script type="text/template"><li>{{user}} said {{text}}</li></script></div>
+		</article>
+	</body></html>`
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	got, _ := extractMainContent(doc, "")
+	if strings.Contains(got, "{{user}}") {
+		t.Fatalf("unrelated text/template leaked into prose: %q", got)
+	}
+	if !strings.Contains(got, "Ordinary article prose") {
+		t.Fatalf("expected the real prose to remain, got: %q", got)
+	}
+}
