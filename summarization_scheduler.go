@@ -558,13 +558,6 @@ func (s *SummarizationScheduler) getArticleDetails(articleURL string) (string, s
 	return feedURL, feedTitle, publishDate
 }
 
-// GetQueueDepth returns the current queue depth (thread-safe)
-func (s *SummarizationScheduler) getQueueDepth() int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.queueDepth
-}
-
 // GetStats returns scheduler statistics
 func (s *SummarizationScheduler) GetStats() map[string]interface{} {
 	s.mu.RLock()
