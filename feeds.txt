@@ -156,3 +156,8 @@ https://www.huntress.com/blog/rss.xml
 https://www.microsoft.com/en-us/security/blog/feed/
 https://www.netscout.com/threatreport/feed/
 https://www.trustwave.com/en-us/rss/spiderlabs-blog/
+https://www.blackhillsinfosec.com/feed/
+https://www.aikido.dev/blog/rss.xml
+https://bishopfox.com/feeds/technology.rss
+https://securitylabs.datadoghq.com/rss/feed.xml
+https://blog.google/security/rss/
