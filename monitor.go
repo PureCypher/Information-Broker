@@ -905,6 +905,10 @@ func extractMainContent(doc *goquery.Document, title string) (text, bodyHTML str
 		// the extractor fell back to <body> and swept in the mobile nav
 		// drawer ("Go Premium", "Popular Topics", hub links).
 		".article-contents",
+		// aikido.dev (Webflow) has no <article>; without this the extractor fell
+		// back to <main> and stored the breadcrumb/title hero, a sidebar and a
+		// trailing CTA around the post (the rich-text body is .blog_content_main).
+		".blog_content_main",
 	}
 	// Broad page wrappers, used ONLY when no precise selector matched — some
 	// sites (Bootstrap admin themes like cvefeed.io) have no article/
@@ -1085,6 +1089,51 @@ func extractMainContent(doc *goquery.Document, title string) (text, bodyHTML str
 	})
 	best.Find("h2.entry_title").Each(func(_ int, s *goquery.Selection) {
 		if norm(title) != "" && strings.Contains(norm(s.Text()), norm(title)) {
+			s.Remove()
+		}
+	})
+
+	// Publisher chrome inside the winning container, found while onboarding
+	// these feeds. Each selector is specific to the template that emits it.
+	//
+	// aikido.dev: the body opens with a "Written by <author>" block and two
+	// "Published on / Last updated on" meta rows; the reading page renders
+	// byline and dates itself. .blog-meta-top is the closing "Share: <page
+	// URL>" row.
+	best.Find(".blog_post_hero_author, .blog_card_meta_top, .blog-meta-top").Remove()
+
+	// bishopfox.com opens <article> with a sticky share rail: a bare "Share"
+	// label plus social icon links. A block whose entire text is "Share" is a
+	// label, never prose.
+	best.Find("div, p, span").Each(func(_ int, s *goquery.Selection) {
+		if strings.EqualFold(norm(s.Text()), "share") {
+			s.Remove()
+		}
+	})
+
+	// blog.google/security: .uni-article-hero is the eyebrow ("Chrome
+	// Security"), headline and date | author line; .uni-blog-article-tags is
+	// the "Posted in:" row that ends the body.
+	best.Find(".uni-article-hero, .uni-blog-article-tags").Remove()
+
+	// securitylabs.datadoghq.com: author cards (name + job title) and a "LAST
+	// UPDATED <date>" badge row open the article column; a .share-article
+	// "twitter / reddit" list ends it. The date row is matched by shape (short
+	// block that starts "last updated" and holds a <time>), so prose that only
+	// mentions "last updated" survives.
+	best.Find(".authors").Each(func(_ int, s *goquery.Selection) {
+		if s.Find(".author-card").Length() > 0 {
+			s.Remove()
+		}
+	})
+	best.Find("div").Each(func(_ int, s *goquery.Selection) {
+		t := strings.ToLower(norm(s.Text()))
+		if strings.HasPrefix(t, "last updated") && len(t) < 60 && s.Find("time").Length() > 0 {
+			s.Remove()
+		}
+	})
+	best.Find(".share-article").Each(func(_ int, s *goquery.Selection) {
+		if len(norm(s.Text())) < 80 {
 			s.Remove()
 		}
 	})
