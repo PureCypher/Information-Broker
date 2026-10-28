@@ -30,7 +30,9 @@ curl http://192.168.1.135:9090/-/healthy      # from the Grafana host: should pr
 
 Prometheus has **no authentication**. Bind it to a LAN address only, never to a
 public interface. Metric history is kept in the `prometheus_data` volume, so
-recreating the container loses nothing.
+recreating the container loses nothing. Binding to one address replaces the
+loopback binding, so on the host itself use that address too
+(`curl http://192.168.1.135:9090/api/v1/query ...`, not `127.0.0.1`).
 
 ### 2. Add the data source and import the dashboard
 
