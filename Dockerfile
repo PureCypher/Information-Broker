@@ -13,6 +13,13 @@ RUN go mod download
 # Copy source code
 COPY . .
 
+# Some publishers serve incomplete TLS chains (e.g. infosecurity-magazine.com
+# omits its GlobalSign GCC R46 intermediate, fetched 2026-10-28 from
+# http://secure.globalsign.com/cacert/gsgccr46ovtlsca2025.crt — Go/curl do not
+# chase AIA "CA Issuers" URLs like browsers do). Appending the intermediate to
+# the system bundle lets x509 verification build the chain.
+RUN cat /app/certs/*.crt >> /etc/ssl/certs/ca-certificates.crt
+
 # Build the application with optimizations
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags='-w -s -extldflags "-static"' \

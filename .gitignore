@@ -58,6 +58,11 @@ firewall-rules.sh
 
 # SSL/TLS certificates and keys
 ssl/
+
+# Public CA intermediate certificates bundled into the image (see Dockerfile);
+# these are public certificates, not keys.
+!certs/
+!certs/*.crt
 nginx/ssl/
 /etc/ssl/certs/information-broker.*
 /etc/ssl/private/information-broker.*
